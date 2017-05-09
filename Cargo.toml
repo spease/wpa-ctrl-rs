@@ -1,7 +1,6 @@
 [package]
 name = "wpactrl"
 description = "wpa_supplicant control interface library"
-license = "MIT"
 license-file = "LICENSE"
 version = "0.1.0"
 authors = [ "Sauyon Lee <s@uyon.co>" ]
