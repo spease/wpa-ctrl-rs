@@ -21,15 +21,15 @@ extern "C" {
 }
 
 macro_rules! cstr {
-  ($e:expr) => (CString::new($e).unwrap().as_ptr());
+  ($e:expr) => (CString::new($e.as_bytes().to_vec()).unwrap().as_ptr());
 }
 
-fn wrap_cb<F: Fn(String)>(f: Option<F>) -> Option<unsafe extern fn(*mut c_char, size_t)> {
+fn wrap_cb<F: Fn(&String)>(f: Option<F>) -> Option<unsafe extern fn(*mut c_char, size_t)> {
   assert!(mem::size_of::<F>() == 0);
   match f {
     Some(_) => {
-      unsafe extern fn wrapped<F: Fn(String)>(msg: *mut c_char, len: size_t) {
-        let str = String::from_raw_parts(msg as *mut u8, len, len);
+      unsafe extern fn wrapped<F: Fn(&String)>(msg: *mut c_char, len: size_t) {
+        let str = &String::from_raw_parts(msg as *mut u8, len, len);
         mem::zeroed::<F>()(str);
       }
       Some(wrapped::<F>)
@@ -40,7 +40,7 @@ fn wrap_cb<F: Fn(String)>(f: Option<F>) -> Option<unsafe extern fn(*mut c_char, 
 }
 
 impl WpaCtrl {
-  pub fn new(ctrl_path: String) -> Result<WpaCtrl, String> {
+  pub fn new(ctrl_path: &String) -> Result<WpaCtrl, String> {
     unsafe {
       let handle = wpa_ctrl_open(cstr!(ctrl_path));
       if handle == ptr::null_mut() {
@@ -50,7 +50,7 @@ impl WpaCtrl {
     }
   }
 
-  pub fn new2(ctrl_path: String, cli_path: String) -> Result<WpaCtrl, String> {
+  pub fn new2(ctrl_path: &String, cli_path: &String) -> Result<WpaCtrl, String> {
     unsafe {
       let handle = wpa_ctrl_open2(cstr!(ctrl_path), cstr!(cli_path));
       if handle == ptr::null_mut() {
@@ -60,12 +60,12 @@ impl WpaCtrl {
     }
   }
 
-  pub fn request(&self, cmd: String, cb: Option<fn(String)>) -> Result<String, String> {
+  pub fn request(&self, cmd: &String, cb: Option<fn(&String)>) -> Result<String, String> {
     unsafe {
       let mut res = Vec::<u8>::with_capacity(500);
       let mut res_len = 500;
       let cmd_len = cmd.len();
-      let c_cmd = CString::new(cmd).unwrap();
+      let c_cmd = CString::new(cmd.as_bytes().to_vec()).unwrap();
 
       match wpa_ctrl_request(self.handle, c_cmd.as_ptr(), cmd_len,
                              res.as_mut_ptr() as *mut c_char, &mut res_len,
