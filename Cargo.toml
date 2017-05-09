@@ -2,7 +2,7 @@
 name = "wpactrl"
 description = "wpa_supplicant control interface library"
 license-file = "LICENSE"
-version = "0.1.0"
+version = "0.1.1"
 authors = [ "Sauyon Lee <s@uyon.co>" ]
 
 [dependencies]
