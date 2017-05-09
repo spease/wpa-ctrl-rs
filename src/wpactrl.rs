@@ -8,8 +8,8 @@ pub struct WpaCtrl {
   handle: *mut c_void
 }
 
-#[link(name = "wpa_ctrl")]
-extern {
+#[link(name="wpactrl", kind="static")]
+extern "C" {
   fn wpa_ctrl_open(ctrl_path: *const c_char) -> *mut c_void;
   fn wpa_ctrl_open2(ctrl_path: *const c_char, cli_pth: *const c_char) -> *mut c_void;
   fn wpa_ctrl_request(ctrl: *mut c_void, cmd: *const c_char, cmd_len: size_t, reply: *mut c_char, reply_len: *mut size_t, msg_cb: unsafe extern fn(msg: *mut c_char, len: size_t)) -> c_int;
