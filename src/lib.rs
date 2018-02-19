@@ -1,3 +1,5 @@
+#[macro_use]
+extern crate failure;
 extern crate libc;
 //extern crate dbus;
 
