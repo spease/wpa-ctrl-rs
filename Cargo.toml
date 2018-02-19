@@ -3,8 +3,8 @@ name = "wpactrl"
 description = "wpa_supplicant control interface library"
 license-file = "LICENSE"
 repository = "https://github.com/sauyon/wpa-ctrl-rs"
-version = "0.2.1"
-authors = [ "Sauyon Lee <s@uyon.co>" ]
+version = "0.3.0"
+authors = [ "Sauyon Lee <s@uyon.co>", "Steven Pease <peasteven@gmail.com>" ]
 
 [dependencies]
 failure = "0.1"
