@@ -29,17 +29,37 @@ pub struct WpaCtrlBuilder {
 
 impl WpaCtrlBuilder {
     /// A path-like object for this application's UNIX domain socket
-    pub fn cli_path<I: Into<Option<P>>, P>(&mut self, cli_path: P) -> &mut Self where P: AsRef<Path> + Sized, Option<PathBuf>: From<P> {
-        let new = self;
-        new.cli_path = cli_path.into();
-        new
+    /// 
+    /// # Examples
+    ///
+    /// ```
+    /// use wpactrl::WpaCtrl;
+    /// let wpa = WpaCtrl::new()
+    ///             .cli_path("/tmp")
+    ///             .open()
+    ///             .unwrap();
+    /// ```
+    pub fn cli_path<I, P>(mut self, cli_path: I) -> Self
+        where I: Into<Option<P>>, P: AsRef<Path> + Sized, PathBuf: From<P> {
+        self.cli_path = cli_path.into().map(PathBuf::from);
+        self
     }
 
     /// A path-like object for the wpasupplicant / hostap UNIX domain sockets
-    pub fn ctrl_path<I: Into<Option<P>>, P>(&mut self, ctrl_path: P) -> &mut Self where P: AsRef<Path> + Sized, Option<PathBuf>: From<P> {
-        let new = self;
-        new.ctrl_path = ctrl_path.into();
-        new
+    /// 
+    /// # Examples
+    ///
+    /// ```
+    /// use wpactrl::WpaCtrl;
+    /// let wpa = WpaCtrl::new()
+    ///             .ctrl_path("/var/run/wpa_supplicant/wlan0")
+    ///             .open()
+    ///             .unwrap();
+    /// ```
+    pub fn ctrl_path<I, P>(mut self, ctrl_path: I) -> Self
+        where I: Into<Option<P>>, P: AsRef<Path> + Sized, PathBuf: From<P> {
+        self.ctrl_path = ctrl_path.into().map(PathBuf::from);
+        self
     }
 
     /// Open a control interface to wpasupplicant.
