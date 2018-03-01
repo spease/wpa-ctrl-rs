@@ -1,5 +1,4 @@
 #![deny(missing_docs)]
-use failure::Error;
 use nix::sys::select::*;
 use nix::sys::time::{TimeVal, TimeValLike};
 use nix::unistd::getpid;
@@ -8,17 +7,20 @@ use std::path::{Path, PathBuf};
 use std::os::unix::io::AsRawFd;
 use std::os::unix::net::UnixDatagram;
 use std;
+use super::Result;
 
+const BUF_SIZE: usize = 10_240;
+const PATH_DEFAULT_CLIENT: &str = "/tmp";
+const PATH_DEFAULT_SERVER: &str = "/var/run/wpa_supplicant/wlan0";
+
+/// Error type used for some library functions
 #[derive(Debug, Fail, PartialEq)]
 enum WpaError {
-    #[fail(display = "An error occurred")]
+    #[fail(display = "Failed to execute the specified command")]
     Failure,
 }
 
-type Result<T> = ::std::result::Result<T, Error>;
-
-const BUF_SIZE: usize = 10_240;
-
+/// Builder object used to construct a `WpaCtrl` session
 #[derive(Default)]
 pub struct WpaCtrlBuilder {
     cli_path: Option<PathBuf>,
@@ -26,25 +28,21 @@ pub struct WpaCtrlBuilder {
 }
 
 impl WpaCtrlBuilder {
-    /// A path-like object for client UNIX domain socket
+    /// A path-like object for this application's UNIX domain socket
     pub fn cli_path<I: Into<Option<P>>, P>(&mut self, cli_path: P) -> &mut Self where P: AsRef<Path> + Sized, Option<PathBuf>: From<P> {
         let new = self;
         new.cli_path = cli_path.into();
         new
     }
 
-    /// A path-like object for UNIX domain sockets
+    /// A path-like object for the wpasupplicant / hostap UNIX domain sockets
     pub fn ctrl_path<I: Into<Option<P>>, P>(&mut self, ctrl_path: P) -> &mut Self where P: AsRef<Path> + Sized, Option<PathBuf>: From<P> {
         let new = self;
         new.ctrl_path = ctrl_path.into();
         new
     }
 
-    /// Open a control interface to wpa_supplicant.
-    /// 
-    /// # Errors
-    ///
-    /// * WpaError::Interface - Unable to open the interface
+    /// Open a control interface to wpasupplicant.
     ///
     /// # Examples
     ///
@@ -57,10 +55,10 @@ impl WpaCtrlBuilder {
         loop {
             counter += 1;
             let bind_filename = format!("wpa_ctrl_{}-{}", getpid(), counter);
-            let bind_filepath = self.cli_path.as_ref().map(|p|p.as_path()).unwrap_or_else(||Path::new("/tmp")).join(bind_filename);
+            let bind_filepath = self.cli_path.as_ref().map(|p|p.as_path()).unwrap_or_else(||Path::new(PATH_DEFAULT_CLIENT)).join(bind_filename);
             match UnixDatagram::bind(&bind_filepath) {
                 Ok(socket) => {
-                    socket.connect(self.ctrl_path.unwrap_or_else(||"/var/run/wpa_supplicant/wlan0".into()))?;
+                    socket.connect(self.ctrl_path.unwrap_or_else(||PATH_DEFAULT_SERVER.into()))?;
                     socket.set_nonblocking(true)?;
                     return Ok(WpaCtrl(WpaCtrlInternal {
                         buffer: [0; BUF_SIZE],
@@ -104,7 +102,7 @@ impl WpaCtrlInternal {
         }
     }
 
-    /// Send a command to wpa_supplicant/hostapd. 
+    /// Send a command to wpasupplicant / hostapd. 
     fn request<F: FnMut(&str)>(&mut self, cmd: &str, mut cb: F) -> Result<String> {
         self.handle.send(cmd.as_bytes())?;
         loop {
@@ -139,7 +137,7 @@ impl Drop for WpaCtrlInternal {
 pub struct WpaCtrl(WpaCtrlInternal);
 
 impl WpaCtrl {
-    /// Creates a builder for a wpa_supplicant / hostap connection
+    /// Creates a builder for a wpasupplicant / hostap connection
     ///
     /// # Examples
     ///
@@ -150,7 +148,7 @@ impl WpaCtrl {
         WpaCtrlBuilder::default()
     }
 
-    /// Register as an event monitor for the control interface.
+    /// Register as an event monitor for control interface messages
     /// 
     /// # Examples
     ///
@@ -167,7 +165,10 @@ impl WpaCtrl {
         }
     }
 
-    /// Send a command to wpa_supplicant/hostapd. 
+    /// Send a command to wpa_supplicant/hostapd.
+    ///
+    /// Commands are generally identical to those used in wpa_cli,
+    /// except all uppercase (eg LIST_NETWORKS, SCAN, etc)
     /// 
     /// # Examples
     ///
@@ -185,7 +186,7 @@ pub struct WpaCtrlAttached(WpaCtrlInternal, VecDeque<String>);
 
 impl WpaCtrlAttached {
 
-    /// Stop listening for messages and discard any that are left
+    /// Stop listening for and discard any remaining control interface messages
     /// 
     /// # Examples
     ///
@@ -202,6 +203,9 @@ impl WpaCtrlAttached {
     }
 
     /// Receive the next control interface message.
+    ///
+    /// Note that multiple control interface messages can be pending;
+    /// call this function repeatedly until it returns None to get all of them.
     /// 
     /// # Examples
     ///
@@ -217,7 +221,13 @@ impl WpaCtrlAttached {
         }
     }
 
-    /// Send a command to wpa_supplicant/hostapd. 
+    /// Send a command to wpa_supplicant/hostapd.
+    ///
+    /// Commands are generally identical to those used in wpa_cli,
+    /// except all uppercase (eg LIST_NETWORKS, SCAN, etc)
+    ///
+    /// Control interface messages will be buffered as the command
+    /// runs, and will be returned on the next call to recv.
     /// 
     /// # Examples
     ///
