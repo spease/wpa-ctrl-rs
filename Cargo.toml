@@ -4,7 +4,7 @@ description = "wpa_supplicant control interface library"
 license = "MIT"
 license-file = "LICENSE"
 repository = "https://github.com/sauyon/wpa-ctrl-rs"
-version = "0.3.0"
+version = "0.3.1"
 authors = [ "Sauyon Lee <s@uyon.co>", "Steven Pease <peasteven@gmail.com>" ]
 
 [dependencies]
