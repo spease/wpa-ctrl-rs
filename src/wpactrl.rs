@@ -1,93 +1,23 @@
 #![deny(missing_docs)]
 use failure::Error;
-use std::cell::RefCell;
-use std::ffi::CString;
-use std::ptr;
+use nix::sys::select::*;
+use nix::sys::time::{TimeVal, TimeValLike};
+use nix::unistd::getpid;
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
-use std::os::unix::ffi::OsStrExt;
-use std::sync::Mutex;
+use std::os::unix::io::AsRawFd;
+use std::os::unix::net::UnixDatagram;
 use std;
-
-use libc::{c_char, c_int, c_void, size_t};
 
 #[derive(Debug, Fail, PartialEq)]
 enum WpaError {
     #[fail(display = "An error occurred")]
     Failure,
-    #[fail(display = "Failed to create interface")]
-    Interface,
-    #[fail(display = "Timed out")]
-    Timeout,
-    #[fail(display = "Unknown error {}", _0)]
-    Unknown(c_int),
 }
 
 type Result<T> = ::std::result::Result<T, Error>;
 
-#[link(name = "wpactrl", kind = "static")]
-extern "C" {
-    fn wpa_ctrl_open2(ctrl_path: *const c_char, cli_pth: *const c_char) -> *mut c_void;
-    fn wpa_ctrl_request(
-        ctrl: *mut c_void,
-        cmd: *const c_char,
-        cmd_len: size_t,
-        reply: *mut c_char,
-        reply_len: *mut size_t,
-        msg_cb: Option<unsafe extern "C" fn(msg: *mut c_char, len: size_t)>,
-    ) -> c_int;
-    fn wpa_ctrl_close(ctrl: *mut c_void);
-    fn wpa_ctrl_pending(ctrl: *mut c_void) -> c_int;
-    fn wpa_ctrl_recv(ctrl: *mut c_void, reply: *mut c_char, len: *mut size_t) -> c_int;
-}
-
-lazy_static! {
-    static ref CALLBACK: Mutex<RefCell<Box<FnMut(Result<&str>) + Send>>> = Mutex::new(RefCell::new(Box::new(|_|())));
-}
-
-fn request_cb<F: Fn(Result<&str>)>(f: Option<F>) -> Option<unsafe extern "C" fn(*mut c_char, size_t)> {
-    match f {
-        Some(_) => {
-            unsafe extern "C" fn wrapped(msg: *mut c_char, len: size_t) {
-                use std::ops::DerefMut;
-                let x = CALLBACK.lock().unwrap();
-                (x.borrow_mut().deref_mut())(std::str::from_utf8(std::slice::from_raw_parts(msg as *const u8, len))
-                    .map_err(Error::from));
-            }
-            Some(wrapped)
-        }
-        None => None,
-    }
-}
-
-/// Send a command to wpa_supplicant/hostapd. 
-fn request_helper(handle: *mut c_void, cmd: &str, cb: Option<fn(Result<&str>)>) -> Result<String> {
-    let mut res_len: size_t = 10240;
-    let mut res = Vec::with_capacity(10240);
-    let c_cmd = CString::new(cmd)?;
-    let c_cmd_len = c_cmd.as_bytes().len();
-
-    match unsafe {
-        wpa_ctrl_request(
-            handle,
-            c_cmd.as_ptr(),
-            c_cmd_len,
-            res.as_mut_ptr() as *mut c_char,
-            &mut res_len,
-            request_cb(cb),
-        )
-    } {
-        0 => {
-            unsafe {
-                res.set_len(res_len);
-            }
-            Ok(String::from_utf8(res)?)
-        }
-        -1 => Err(WpaError::Failure.into()),
-        -2 => Err(WpaError::Timeout.into()),
-        x => Err(WpaError::Unknown(x).into()),
-    }
-}
-
+const BUF_SIZE: usize = 10_240;
 
 #[derive(Default)]
 pub struct WpaCtrlBuilder {
@@ -123,25 +53,90 @@ impl WpaCtrlBuilder {
     /// let wpa = WpaCtrl::new().open().unwrap();
     /// ```
     pub fn open(self) -> Result<WpaCtrl> {
-        let ctrl_path = self.ctrl_path.unwrap_or("/var/run/wpa_supplicant/wlan0".into());
-        let handle = unsafe { wpa_ctrl_open2(
-            CString::new(ctrl_path.as_path().as_os_str().as_bytes())?.as_ptr(),
-            if let Some(cli_path) = self.cli_path {
-                CString::new(cli_path.as_path().as_os_str().as_bytes())?.as_ptr()
-            } else {
-                ptr::null()
-            }
-        ) };
-        if handle == ptr::null_mut() {
-            Err(WpaError::Interface)?
-        } else {
-            Ok(WpaCtrl(handle))
+        let mut counter = 0;
+        loop {
+            counter += 1;
+            let bind_filename = format!("wpa_ctrl_{}-{}", getpid(), counter);
+            let bind_filepath = self.cli_path.as_ref().map(|p|p.as_path()).unwrap_or_else(||Path::new("/tmp")).join(bind_filename);
+            match UnixDatagram::bind(&bind_filepath) {
+                Ok(socket) => {
+                    socket.connect(self.ctrl_path.unwrap_or_else(||"/var/run/wpa_supplicant/wlan0".into()))?;
+                    socket.set_nonblocking(true)?;
+                    return Ok(WpaCtrl(WpaCtrlInternal {
+                        buffer: [0; BUF_SIZE],
+                        handle: socket,
+                        filepath: bind_filepath,
+                    }))
+                },
+                Err(ref e) if counter < 2 && e.kind() == std::io::ErrorKind::AddrInUse => {
+                    std::fs::remove_file(bind_filepath)?;
+                    continue;
+                },
+                Err(e) => Err(e)?,
+            };
         }
     }
 }
 
-/// A connection to wpa_supplicant / hostap
-pub struct WpaCtrl(*mut c_void);
+struct WpaCtrlInternal {
+    buffer: [u8; BUF_SIZE],
+    handle: UnixDatagram,
+    filepath: PathBuf,
+}
+
+impl WpaCtrlInternal {
+    /// Check if any messages are available
+    pub fn pending(&mut self) -> Result<bool> {
+        let mut fd_set = FdSet::new();
+        let raw_fd = self.handle.as_raw_fd();
+        fd_set.insert(raw_fd);
+        select(raw_fd+1, Some(&mut fd_set), None, None, Some(&mut TimeVal::seconds(0)))?;
+        Ok(fd_set.contains(raw_fd))
+    }
+
+    /// Receive a message
+    pub fn recv(&mut self) -> Result<Option<String>> {
+        if self.pending()? {
+            let buf_len = self.handle.recv(&mut self.buffer)?;
+            std::str::from_utf8(&self.buffer[0..buf_len]).map(|s|Some(s.to_owned())).map_err(|e|e.into())
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Send a command to wpa_supplicant/hostapd. 
+    fn request<F: FnMut(&str)>(&mut self, cmd: &str, mut cb: F) -> Result<String> {
+        self.handle.send(cmd.as_bytes())?;
+        loop {
+            let mut fd_set = FdSet::new();
+            fd_set.insert(self.handle.as_raw_fd());
+            select(self.handle.as_raw_fd()+1, Some(&mut fd_set), None, None, Some(&mut TimeVal::seconds(10)))?;
+            match self.handle.recv(&mut self.buffer) {
+                Ok(len) => {
+                    let s = std::str::from_utf8(&self.buffer[0..len])?;
+                    if s.starts_with('<') {
+                        cb(s)
+                    } else {
+                        return Ok(s.to_owned());
+                    }
+                },
+                Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(e) => return Err(e.into()),
+            }
+        }
+    }
+}
+
+impl Drop for WpaCtrlInternal {
+    fn drop(&mut self) {
+        if let Err(e) = std::fs::remove_file(&self.filepath) {
+            warn!("Unable to unlink {:?}", e);
+        }
+    }
+}
+
+/// A connection to wpasupplicant / hostap
+pub struct WpaCtrl(WpaCtrlInternal);
 
 impl WpaCtrl {
     /// Creates a builder for a wpa_supplicant / hostap connection
@@ -163,13 +158,12 @@ impl WpaCtrl {
     /// let mut wpa = wpactrl::WpaCtrl::new().open().unwrap();
     /// let wpa_attached = wpa.attach().unwrap();
     /// ```
-    pub fn attach(self) -> Result<WpaCtrlAttached> {
-        if request_helper(self.0, "ATTACH", None)? != "OK\n" {
+    pub fn attach(mut self) -> Result<WpaCtrlAttached> {
+        // FIXME: None closure would be better
+        if self.0.request("ATTACH", |_: &str|())? != "OK\n" {
             Err(WpaError::Failure.into())
         } else {
-            let handle = self.0;
-            std::mem::forget(self);
-            Ok(WpaCtrlAttached(handle))
+            Ok(WpaCtrlAttached(self.0, VecDeque::new()))
         }
     }
 
@@ -179,27 +173,19 @@ impl WpaCtrl {
     ///
     /// ```
     /// let mut wpa = wpactrl::WpaCtrl::new().open().unwrap();
-    /// wpa.request("PING").unwrap();
+    /// assert_eq!(wpa.request("PING").unwrap(), "PONG\n");
     /// ```
     pub fn request(&mut self, cmd: &str) -> Result<String> {
-        request_helper(self.0, cmd, None)
+        self.0.request(cmd, |_: &str|())
     }
 }
 
-impl Drop for WpaCtrl {
-    fn drop(&mut self) {
-        unsafe {
-            wpa_ctrl_close(self.0);
-        }
-    }
-}
-
-/// A connection to wpa_supplicant / hostap that receives status messages
-pub struct WpaCtrlAttached(*mut c_void);
+/// A connection to wpasupplicant / hostap that receives status messages
+pub struct WpaCtrlAttached(WpaCtrlInternal, VecDeque<String>);
 
 impl WpaCtrlAttached {
 
-    /// Unregister event monitor from the control interface.
+    /// Stop listening for messages and discard any that are left
     /// 
     /// # Examples
     ///
@@ -207,78 +193,51 @@ impl WpaCtrlAttached {
     /// let mut wpa = wpactrl::WpaCtrl::new().open().unwrap().attach().unwrap();
     /// wpa.detach().unwrap();
     /// ```
-    pub fn detach(self) -> Result<WpaCtrl> {
-        if request_helper(self.0, "DETACH", None)? != "OK\n" {
+    pub fn detach(mut self) -> Result<WpaCtrl> {
+        if self.0.request("DETACH", |_: &str|())? != "OK\n" {
             Err(WpaError::Failure.into())
         } else {
-            let handle = self.0;
-            std::mem::forget(self);
-            Ok(WpaCtrl(handle))
+            Ok(WpaCtrl(self.0))
         }
     }
 
-    /// Check whether there are pending event messages.
+    /// Receive the next control interface message.
     /// 
     /// # Examples
     ///
     /// ```
     /// let mut wpa = wpactrl::WpaCtrl::new().open().unwrap().attach().unwrap();
-    /// wpa.pending().unwrap();
+    /// assert_eq!(wpa.recv().unwrap(), None);
     /// ```
-    pub fn pending(&mut self) -> Result<bool> {
-        match unsafe { wpa_ctrl_pending(self.0) } {
-            0 => Ok(false),
-            1 => Ok(true),
-            -1 => Err(WpaError::Failure.into()),
-            x => Err(WpaError::Unknown(x).into()),
+    pub fn recv(&mut self) -> Result<Option<String>> {
+        if let Some(s) = self.1.pop_back() {
+            Ok(Some(s))
+        } else {
+            self.0.recv()
         }
     }
 
-    /// Receive a pending control interface message.
+    /// Send a command to wpa_supplicant/hostapd. 
     /// 
     /// # Examples
     ///
     /// ```
-    /// let mut wpa = wpactrl::WpaCtrl::new().open().unwrap().attach().unwrap();
-    /// if wpa.pending().unwrap() {
-    ///     wpa.recv().unwrap();
-    /// }
+    /// let mut wpa = wpactrl::WpaCtrl::new().open().unwrap();
+    /// assert_eq!(wpa.request("PING").unwrap(), "PONG\n");
     /// ```
-    pub fn recv(&mut self) -> Result<String> {
-        let mut res_len: size_t = 10240;
-        let mut res = Vec::with_capacity(res_len);
-        match unsafe { wpa_ctrl_recv(self.0, res.as_mut_ptr() as *mut c_char, &mut res_len) } {
-            0 => {
-                unsafe {
-                    res.set_len(res_len);
-                }
-                Ok(String::from_utf8(res)?)
-            }
-            -1 => Err(WpaError::Failure.into()),
-            x => Err(WpaError::Unknown(x).into()),
-        }
-    }
-
-    pub fn request(&mut self, cmd: &str, cb: fn(Result<&str>)) -> Result<String> {
-        request_helper(self.0, cmd, Some(cb))
-    }
-}
-
-impl Drop for WpaCtrlAttached {
-    fn drop(&mut self) {
-        unsafe {
-            wpa_ctrl_close(self.0);
-        }
+    pub fn request(&mut self, cmd: &str) -> Result<String> {
+        let mut messages = VecDeque::new();
+        let r = self.0.request(cmd, |s: &str|{
+            messages.push_front(s.into())
+        });
+        self.1.extend(messages);
+        r
     }
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
-
-    fn assert_err<T: std::fmt::Debug>(r: Result<T>, e2: WpaError) {
-        assert_eq!(r.unwrap_err().downcast::<WpaError>().unwrap(), e2);
-    }
 
     fn wpa_ctrl() -> WpaCtrl {
         WpaCtrl::new().open().unwrap()
@@ -306,25 +265,23 @@ mod test {
         assert_eq!(wpa.request("PING").unwrap(), "PONG\n");
         let mut wpa_attached = wpa.attach().unwrap();
         // FIXME: This may not trigger the callback
-        assert_eq!(wpa_attached.request("PING", |s|println!("CB: {:?}", s.unwrap())).unwrap(), "PONG\n");
-    }
-
-    #[test]
-    fn pending() {
-        let mut wpa = wpa_ctrl().attach().unwrap();
-        assert_eq!(wpa.pending().unwrap(), false);
-        wpa.detach().unwrap();
+        assert_eq!(wpa_attached.request("PING").unwrap(), "PONG\n");
     }
 
     #[test]
     fn recv() {
         let mut wpa = wpa_ctrl().attach().unwrap();
-        assert_err(wpa.recv(), WpaError::Failure);
-        assert_eq!(wpa.request("SCAN", |_|()).unwrap(), "OK\n");
-        while !wpa.pending().unwrap() {
-            std::thread::sleep(std::time::Duration::from_millis(10));
+        assert_eq!(wpa.recv().unwrap(), None);
+        assert_eq!(wpa.request("SCAN").unwrap(), "OK\n");
+        loop {
+            match wpa.recv().unwrap() {
+                Some(s) => {
+                    assert_eq!(&s[3..], "CTRL-EVENT-SCAN-STARTED ");
+                    break;
+                }
+                None => std::thread::sleep(std::time::Duration::from_millis(10)),
+            }
         }
-        assert_eq!(&wpa.recv().unwrap()[3..], "CTRL-EVENT-SCAN-STARTED ");
         wpa.detach().unwrap();
     }
 }

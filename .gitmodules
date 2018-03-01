@@ -1,4 +1,0 @@
-[submodule "src/wpa_supplicant"]
-	path = src/wpa_supplicant
-	url = git://w1.fi/hostap.git
-	shallow = true
