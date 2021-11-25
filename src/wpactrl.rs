@@ -1,24 +1,19 @@
 #![deny(missing_docs)]
+use super::Result;
 use nix::sys::select::*;
 use nix::sys::time::{TimeVal, TimeValLike};
 use nix::unistd::getpid;
+use std;
 use std::collections::VecDeque;
-use std::path::{Path, PathBuf};
 use std::os::unix::io::AsRawFd;
 use std::os::unix::net::UnixDatagram;
-use std;
-use super::Result;
+use std::path::{Path, PathBuf};
+
+use crate::error::WpaError;
 
 const BUF_SIZE: usize = 10_240;
 const PATH_DEFAULT_CLIENT: &str = "/tmp";
 const PATH_DEFAULT_SERVER: &str = "/var/run/wpa_supplicant/wlan0";
-
-/// Error type used for some library functions
-#[derive(Debug, Fail, PartialEq)]
-enum WpaError {
-    #[fail(display = "Failed to execute the specified command")]
-    Failure,
-}
 
 /// Builder object used to construct a `WpaCtrl` session
 #[derive(Default)]
@@ -29,7 +24,7 @@ pub struct WpaCtrlBuilder {
 
 impl WpaCtrlBuilder {
     /// A path-like object for this application's UNIX domain socket
-    /// 
+    ///
     /// # Examples
     ///
     /// ```
@@ -40,13 +35,17 @@ impl WpaCtrlBuilder {
     ///             .unwrap();
     /// ```
     pub fn cli_path<I, P>(mut self, cli_path: I) -> Self
-        where I: Into<Option<P>>, P: AsRef<Path> + Sized, PathBuf: From<P> {
+    where
+        I: Into<Option<P>>,
+        P: AsRef<Path> + Sized,
+        PathBuf: From<P>,
+    {
         self.cli_path = cli_path.into().map(PathBuf::from);
         self
     }
 
     /// A path-like object for the wpasupplicant / hostap UNIX domain sockets
-    /// 
+    ///
     /// # Examples
     ///
     /// ```
@@ -57,7 +56,11 @@ impl WpaCtrlBuilder {
     ///             .unwrap();
     /// ```
     pub fn ctrl_path<I, P>(mut self, ctrl_path: I) -> Self
-        where I: Into<Option<P>>, P: AsRef<Path> + Sized, PathBuf: From<P> {
+    where
+        I: Into<Option<P>>,
+        P: AsRef<Path> + Sized,
+        PathBuf: From<P>,
+    {
         self.ctrl_path = ctrl_path.into().map(PathBuf::from);
         self
     }
@@ -75,21 +78,26 @@ impl WpaCtrlBuilder {
         loop {
             counter += 1;
             let bind_filename = format!("wpa_ctrl_{}-{}", getpid(), counter);
-            let bind_filepath = self.cli_path.as_ref().map(|p|p.as_path()).unwrap_or_else(||Path::new(PATH_DEFAULT_CLIENT)).join(bind_filename);
+            let bind_filepath = self
+                .cli_path
+                .as_ref()
+                .map(|p| p.as_path())
+                .unwrap_or_else(|| Path::new(PATH_DEFAULT_CLIENT))
+                .join(bind_filename);
             match UnixDatagram::bind(&bind_filepath) {
                 Ok(socket) => {
-                    socket.connect(self.ctrl_path.unwrap_or_else(||PATH_DEFAULT_SERVER.into()))?;
+                    socket.connect(self.ctrl_path.unwrap_or_else(|| PATH_DEFAULT_SERVER.into()))?;
                     socket.set_nonblocking(true)?;
                     return Ok(WpaCtrl(WpaCtrlInternal {
                         buffer: [0; BUF_SIZE],
                         handle: socket,
                         filepath: bind_filepath,
-                    }))
-                },
+                    }));
+                }
                 Err(ref e) if counter < 2 && e.kind() == std::io::ErrorKind::AddrInUse => {
                     std::fs::remove_file(bind_filepath)?;
                     continue;
-                },
+                }
                 Err(e) => Err(e)?,
             };
         }
@@ -108,7 +116,13 @@ impl WpaCtrlInternal {
         let mut fd_set = FdSet::new();
         let raw_fd = self.handle.as_raw_fd();
         fd_set.insert(raw_fd);
-        select(raw_fd+1, Some(&mut fd_set), None, None, Some(&mut TimeVal::seconds(0)))?;
+        select(
+            raw_fd + 1,
+            Some(&mut fd_set),
+            None,
+            None,
+            Some(&mut TimeVal::seconds(0)),
+        )?;
         Ok(fd_set.contains(raw_fd))
     }
 
@@ -116,19 +130,27 @@ impl WpaCtrlInternal {
     pub fn recv(&mut self) -> Result<Option<String>> {
         if self.pending()? {
             let buf_len = self.handle.recv(&mut self.buffer)?;
-            std::str::from_utf8(&self.buffer[0..buf_len]).map(|s|Some(s.to_owned())).map_err(|e|e.into())
+            std::str::from_utf8(&self.buffer[0..buf_len])
+                .map(|s| Some(s.to_owned()))
+                .map_err(|e| e.into())
         } else {
             Ok(None)
         }
     }
 
-    /// Send a command to wpasupplicant / hostapd. 
+    /// Send a command to wpasupplicant / hostapd.
     fn request<F: FnMut(&str)>(&mut self, cmd: &str, mut cb: F) -> Result<String> {
         self.handle.send(cmd.as_bytes())?;
         loop {
             let mut fd_set = FdSet::new();
             fd_set.insert(self.handle.as_raw_fd());
-            select(self.handle.as_raw_fd()+1, Some(&mut fd_set), None, None, Some(&mut TimeVal::seconds(10)))?;
+            select(
+                self.handle.as_raw_fd() + 1,
+                Some(&mut fd_set),
+                None,
+                None,
+                Some(&mut TimeVal::seconds(10)),
+            )?;
             match self.handle.recv(&mut self.buffer) {
                 Ok(len) => {
                     let s = std::str::from_utf8(&self.buffer[0..len])?;
@@ -137,7 +159,7 @@ impl WpaCtrlInternal {
                     } else {
                         return Ok(s.to_owned());
                     }
-                },
+                }
                 Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
                 Err(e) => return Err(e.into()),
             }
@@ -169,7 +191,7 @@ impl WpaCtrl {
     }
 
     /// Register as an event monitor for control interface messages
-    /// 
+    ///
     /// # Examples
     ///
     /// ```
@@ -178,8 +200,8 @@ impl WpaCtrl {
     /// ```
     pub fn attach(mut self) -> Result<WpaCtrlAttached> {
         // FIXME: None closure would be better
-        if self.0.request("ATTACH", |_: &str|())? != "OK\n" {
-            Err(WpaError::Failure.into())
+        if self.0.request("ATTACH", |_: &str| ())? != "OK\n" {
+            Err(WpaError::Attach)
         } else {
             Ok(WpaCtrlAttached(self.0, VecDeque::new()))
         }
@@ -189,7 +211,7 @@ impl WpaCtrl {
     ///
     /// Commands are generally identical to those used in wpa_cli,
     /// except all uppercase (eg LIST_NETWORKS, SCAN, etc)
-    /// 
+    ///
     /// # Examples
     ///
     /// ```
@@ -197,7 +219,7 @@ impl WpaCtrl {
     /// assert_eq!(wpa.request("PING").unwrap(), "PONG\n");
     /// ```
     pub fn request(&mut self, cmd: &str) -> Result<String> {
-        self.0.request(cmd, |_: &str|())
+        self.0.request(cmd, |_: &str| ())
     }
 }
 
@@ -205,9 +227,8 @@ impl WpaCtrl {
 pub struct WpaCtrlAttached(WpaCtrlInternal, VecDeque<String>);
 
 impl WpaCtrlAttached {
-
     /// Stop listening for and discard any remaining control interface messages
-    /// 
+    ///
     /// # Examples
     ///
     /// ```
@@ -215,8 +236,8 @@ impl WpaCtrlAttached {
     /// wpa.detach().unwrap();
     /// ```
     pub fn detach(mut self) -> Result<WpaCtrl> {
-        if self.0.request("DETACH", |_: &str|())? != "OK\n" {
-            Err(WpaError::Failure.into())
+        if self.0.request("DETACH", |_: &str| ())? != "OK\n" {
+            Err(WpaError::Detach)
         } else {
             Ok(WpaCtrl(self.0))
         }
@@ -226,7 +247,7 @@ impl WpaCtrlAttached {
     ///
     /// Note that multiple control interface messages can be pending;
     /// call this function repeatedly until it returns None to get all of them.
-    /// 
+    ///
     /// # Examples
     ///
     /// ```
@@ -248,7 +269,7 @@ impl WpaCtrlAttached {
     ///
     /// Control interface messages will be buffered as the command
     /// runs, and will be returned on the next call to recv.
-    /// 
+    ///
     /// # Examples
     ///
     /// ```
@@ -257,9 +278,7 @@ impl WpaCtrlAttached {
     /// ```
     pub fn request(&mut self, cmd: &str) -> Result<String> {
         let mut messages = VecDeque::new();
-        let r = self.0.request(cmd, |s: &str|{
-            messages.push_front(s.into())
-        });
+        let r = self.0.request(cmd, |s: &str| messages.push_front(s.into()));
         self.1.extend(messages);
         r
     }
@@ -275,7 +294,15 @@ mod test {
 
     #[test]
     fn attach() {
-        wpa_ctrl().attach().unwrap().detach().unwrap().attach().unwrap().detach().unwrap();
+        wpa_ctrl()
+            .attach()
+            .unwrap()
+            .detach()
+            .unwrap()
+            .attach()
+            .unwrap()
+            .detach()
+            .unwrap();
     }
 
     #[test]
