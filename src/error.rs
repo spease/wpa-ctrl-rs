@@ -26,9 +26,9 @@ impl std::error::Error for WpaError {
         match *self {
             WpaError::Attach => None,
             WpaError::Detach => None,
-            WpaError::Io(_) => None,
-            WpaError::Nix(_) => None,
-            WpaError::Utf8ToStr(_) => None,
+            WpaError::Io(ref source) => Some(source),
+            WpaError::Nix(ref source) => Some(source),
+            WpaError::Utf8ToStr(ref source) => Some(source),
         }
     }
 }
@@ -48,7 +48,9 @@ impl std::fmt::Display for WpaError {
             WpaError::Nix(ref err) => {
                 write!(f, "Failed to execute the specified command: {}", err)
             }
-            WpaError::Utf8ToStr(ref err) => err.fmt(f),
+            WpaError::Utf8ToStr(ref err) => {
+                write!(f, "Failed to parse UTF8 to string: {}", err)
+            }
         }
     }
 }
