@@ -29,7 +29,7 @@ impl WpaCtrlBuilder {
     ///
     /// ```
     /// use wpactrl::WpaCtrl;
-    /// let wpa = WpaCtrl::new()
+    /// let wpa = WpaCtrl::builder()
     ///             .cli_path("/tmp")
     ///             .open()
     ///             .unwrap();
@@ -50,7 +50,7 @@ impl WpaCtrlBuilder {
     ///
     /// ```
     /// use wpactrl::WpaCtrl;
-    /// let wpa = WpaCtrl::new()
+    /// let wpa = WpaCtrl::builder()
     ///             .ctrl_path("/var/run/wpa_supplicant/wlan0")
     ///             .open()
     ///             .unwrap();
@@ -71,7 +71,7 @@ impl WpaCtrlBuilder {
     ///
     /// ```
     /// use wpactrl::WpaCtrl;
-    /// let wpa = WpaCtrl::new().open().unwrap();
+    /// let wpa = WpaCtrl::builder().open().unwrap();
     /// ```
     pub fn open(self) -> Result<WpaCtrl> {
         let mut counter = 0;
@@ -194,7 +194,7 @@ impl WpaCtrl {
     /// # Examples
     ///
     /// ```
-    /// let mut wpa = wpactrl::WpaCtrl::new().open().unwrap();
+    /// let mut wpa = wpactrl::WpaCtrl::builder().open().unwrap();
     /// let wpa_attached = wpa.attach().unwrap();
     /// ```
     pub fn attach(mut self) -> Result<WpaCtrlAttached> {
@@ -214,7 +214,7 @@ impl WpaCtrl {
     /// # Examples
     ///
     /// ```
-    /// let mut wpa = wpactrl::WpaCtrl::new().open().unwrap();
+    /// let mut wpa = wpactrl::WpaCtrl::builder().open().unwrap();
     /// assert_eq!(wpa.request("PING").unwrap(), "PONG\n");
     /// ```
     pub fn request(&mut self, cmd: &str) -> Result<String> {
@@ -231,7 +231,7 @@ impl WpaCtrlAttached {
     /// # Examples
     ///
     /// ```
-    /// let mut wpa = wpactrl::WpaCtrl::new().open().unwrap().attach().unwrap();
+    /// let mut wpa = wpactrl::WpaCtrl::builder().open().unwrap().attach().unwrap();
     /// wpa.detach().unwrap();
     /// ```
     pub fn detach(mut self) -> Result<WpaCtrl> {
@@ -250,7 +250,7 @@ impl WpaCtrlAttached {
     /// # Examples
     ///
     /// ```
-    /// let mut wpa = wpactrl::WpaCtrl::new().open().unwrap().attach().unwrap();
+    /// let mut wpa = wpactrl::WpaCtrl::builder().open().unwrap().attach().unwrap();
     /// assert_eq!(wpa.recv().unwrap(), None);
     /// ```
     pub fn recv(&mut self) -> Result<Option<String>> {
@@ -272,7 +272,7 @@ impl WpaCtrlAttached {
     /// # Examples
     ///
     /// ```
-    /// let mut wpa = wpactrl::WpaCtrl::new().open().unwrap();
+    /// let mut wpa = wpactrl::WpaCtrl::builder().open().unwrap();
     /// assert_eq!(wpa.request("PING").unwrap(), "PONG\n");
     /// ```
     pub fn request(&mut self, cmd: &str) -> Result<String> {
@@ -311,7 +311,7 @@ mod test {
     }
 
     #[test]
-    fn new() {
+    fn builder() {
         wpa_ctrl();
     }
 

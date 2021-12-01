@@ -7,7 +7,7 @@
 //! # Example
 //!
 //! ```
-//! let mut wpa = wpactrl::WpaCtrl::new().open().unwrap();
+//! let mut wpa = wpactrl::WpaCtrl::builder().open().unwrap();
 //! println!("{}", wpa.request("LIST_NETWORKS").unwrap());
 //! ```
 //!
