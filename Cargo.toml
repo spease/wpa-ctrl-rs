@@ -9,5 +9,5 @@ version = "0.3.1"
 authors = [ "Sauyon Lee <s@uyon.co>", "Steven Pease <peasteven@gmail.com>" ]
 
 [dependencies]
-nix = "0.22.1"
-log = "0.4.14"
+log = { version = "0.4.14", default-features = false }
+libc = { version = "0.2.101", default-features = false }

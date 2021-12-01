@@ -8,9 +8,6 @@ pub enum WpaError {
     /// Represents all cases of `std::io::Error`.
     Io(io::Error),
 
-    /// Represents all cases of `nix::Error`.
-    Nix(nix::Error),
-
     /// Represents a failure to interpret a sequence of u8 as a string slice.
     Utf8ToStr(str::Utf8Error),
 
@@ -19,6 +16,9 @@ pub enum WpaError {
 
     /// Represents a failed `DETACH` request to wpasupplicant.
     Detach,
+
+    /// Error waiting for a response
+    Wait
 }
 
 impl std::error::Error for WpaError {
@@ -26,8 +26,8 @@ impl std::error::Error for WpaError {
         match *self {
             WpaError::Attach => None,
             WpaError::Detach => None,
+            WpaError::Wait => None,
             WpaError::Io(ref source) => Some(source),
-            WpaError::Nix(ref source) => Some(source),
             WpaError::Utf8ToStr(ref source) => Some(source),
         }
     }
@@ -42,10 +42,10 @@ impl std::fmt::Display for WpaError {
             WpaError::Detach => {
                 write!(f, "Failed to detach from wpasupplicant")
             }
-            WpaError::Io(ref err) => {
-                write!(f, "Failed to execute the specified command: {}", err)
+            WpaError::Wait => {
+                write!(f, "Unable to wait for response from wpasupplicant")
             }
-            WpaError::Nix(ref err) => {
+            WpaError::Io(ref err) => {
                 write!(f, "Failed to execute the specified command: {}", err)
             }
             WpaError::Utf8ToStr(ref err) => {
@@ -58,12 +58,6 @@ impl std::fmt::Display for WpaError {
 impl From<std::io::Error> for WpaError {
     fn from(err: std::io::Error) -> WpaError {
         WpaError::Io(err)
-    }
-}
-
-impl From<nix::Error> for WpaError {
-    fn from(err: nix::Error) -> WpaError {
-        WpaError::Nix(err)
     }
 }
 

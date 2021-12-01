@@ -1,13 +1,11 @@
 #![deny(missing_docs)]
 use super::Result;
 use log::warn;
-use nix::sys::select::*;
-use nix::sys::time::{TimeVal, TimeValLike};
-use nix::unistd::getpid;
 use std::collections::VecDeque;
-use std::os::unix::io::AsRawFd;
+use std::os::unix::io::{AsRawFd, RawFd};
 use std::os::unix::net::UnixDatagram;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use crate::error::WpaError;
 
@@ -77,7 +75,7 @@ impl WpaCtrlBuilder {
         let mut counter = 0;
         loop {
             counter += 1;
-            let bind_filename = format!("wpa_ctrl_{}-{}", getpid(), counter);
+            let bind_filename = format!("wpa_ctrl_{}-{}", std::process::id(), counter);
             let bind_filepath = self
                 .cli_path
                 .as_deref()
@@ -109,20 +107,37 @@ struct WpaCtrlInternal {
     filepath: PathBuf,
 }
 
+fn select(fd: RawFd, duration: Duration) -> Result<bool> {
+    let r = unsafe {
+        let mut raw_fd_set = {
+            let mut raw_fd_set = std::mem::MaybeUninit::<libc::fd_set>::uninit();
+            libc::FD_ZERO(raw_fd_set.as_mut_ptr());
+            raw_fd_set.assume_init()
+        };
+        libc::FD_SET(fd, &mut raw_fd_set);
+        libc::select(
+            fd + 1,
+            &mut raw_fd_set,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &mut libc::timeval {
+                tv_sec: duration.as_secs() as i64,
+                tv_usec: duration.subsec_micros() as i64,
+            },
+        )
+    };
+
+    if r >= 0 {
+        Ok(r > 0)
+    } else {
+        Err(WpaError::Wait)
+    }
+}
+
 impl WpaCtrlInternal {
     /// Check if any messages are available
     pub fn pending(&mut self) -> Result<bool> {
-        let mut fd_set = FdSet::new();
-        let raw_fd = self.handle.as_raw_fd();
-        fd_set.insert(raw_fd);
-        select(
-            raw_fd + 1,
-            Some(&mut fd_set),
-            None,
-            None,
-            Some(&mut TimeVal::seconds(0)),
-        )?;
-        Ok(fd_set.contains(raw_fd))
+        select(self.handle.as_raw_fd(), Duration::from_secs(0))
     }
 
     /// Receive a message
@@ -141,15 +156,7 @@ impl WpaCtrlInternal {
     fn request<F: FnMut(&str)>(&mut self, cmd: &str, mut cb: F) -> Result<String> {
         self.handle.send(cmd.as_bytes())?;
         loop {
-            let mut fd_set = FdSet::new();
-            fd_set.insert(self.handle.as_raw_fd());
-            select(
-                self.handle.as_raw_fd() + 1,
-                Some(&mut fd_set),
-                None,
-                None,
-                Some(&mut TimeVal::seconds(10)),
-            )?;
+            select(self.handle.as_raw_fd(), Duration::from_secs(10))?;
             match self.handle.recv(&mut self.buffer) {
                 Ok(len) => {
                     let s = std::str::from_utf8(&self.buffer[0..len])?;
