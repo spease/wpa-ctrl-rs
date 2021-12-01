@@ -14,14 +14,14 @@
 //! The library currently only supports UNIX sockets, but additional
 //! connection methods (eg UDP or pipes) may be added in the future.
 #[macro_use]
-extern crate failure;
-#[macro_use]
 extern crate log;
 extern crate nix;
 
+mod error;
 mod wpactrl;
 pub use wpactrl::{WpaCtrl, WpaCtrlAttached, WpaCtrlBuilder};
 
-use failure::Error;
+use crate::error::WpaError;
+
 /// Result type used for the library
-pub type Result<T> = ::std::result::Result<T, Error>;
+pub type Result<T> = ::std::result::Result<T, WpaError>;
