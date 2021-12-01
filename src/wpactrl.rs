@@ -1,9 +1,9 @@
 #![deny(missing_docs)]
 use super::Result;
+use log::warn;
 use nix::sys::select::*;
 use nix::sys::time::{TimeVal, TimeValLike};
 use nix::unistd::getpid;
-use std;
 use std::collections::VecDeque;
 use std::os::unix::io::AsRawFd;
 use std::os::unix::net::UnixDatagram;
@@ -80,8 +80,7 @@ impl WpaCtrlBuilder {
             let bind_filename = format!("wpa_ctrl_{}-{}", getpid(), counter);
             let bind_filepath = self
                 .cli_path
-                .as_ref()
-                .map(|p| p.as_path())
+                .as_deref()
                 .unwrap_or_else(|| Path::new(PATH_DEFAULT_CLIENT))
                 .join(bind_filename);
             match UnixDatagram::bind(&bind_filepath) {
@@ -98,7 +97,7 @@ impl WpaCtrlBuilder {
                     std::fs::remove_file(bind_filepath)?;
                     continue;
                 }
-                Err(e) => Err(e)?,
+                Err(e) => return Err(e.into()),
             };
         }
     }
@@ -184,9 +183,9 @@ impl WpaCtrl {
     /// # Examples
     ///
     /// ```
-    /// let wpa = wpactrl::WpaCtrl::new().open().unwrap();
+    /// let wpa = wpactrl::WpaCtrl::builder().open().unwrap();
     /// ```
-    pub fn new() -> WpaCtrlBuilder {
+    pub fn builder() -> WpaCtrlBuilder {
         WpaCtrlBuilder::default()
     }
 
@@ -289,7 +288,7 @@ mod test {
     use super::*;
 
     fn wpa_ctrl() -> WpaCtrl {
-        WpaCtrl::new().open().unwrap()
+        WpaCtrl::builder().open().unwrap()
     }
 
     #[test]

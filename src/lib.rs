@@ -13,13 +13,10 @@
 //!
 //! The library currently only supports UNIX sockets, but additional
 //! connection methods (eg UDP or pipes) may be added in the future.
-#[macro_use]
-extern crate log;
-extern crate nix;
 
 mod error;
 mod wpactrl;
-pub use wpactrl::{WpaCtrl, WpaCtrlAttached, WpaCtrlBuilder};
+pub use crate::wpactrl::{WpaCtrl, WpaCtrlAttached, WpaCtrlBuilder};
 
 use crate::error::WpaError;
 

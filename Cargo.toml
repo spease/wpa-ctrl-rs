@@ -1,6 +1,7 @@
 [package]
 name = "wpactrl"
 description = "wpa_supplicant control interface library"
+edition = "2018"
 license = "MIT"
 license-file = "LICENSE"
 repository = "https://github.com/sauyon/wpa-ctrl-rs"
