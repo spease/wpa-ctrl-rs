@@ -18,7 +18,7 @@ mod error;
 mod wpactrl;
 pub use crate::wpactrl::{WpaCtrl, WpaCtrlAttached, WpaCtrlBuilder};
 
-use crate::error::WpaError;
+pub use crate::error::WpaError;
 
 /// Result type used for the library
 pub type Result<T> = ::std::result::Result<T, WpaError>;
