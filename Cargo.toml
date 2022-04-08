@@ -3,7 +3,7 @@ name = "wpactrl"
 description = "wpa_supplicant control interface library"
 edition = "2021"
 license = "MIT"
-repository = "https://github.com/sauyon/wpa-ctrl-rs"
+repository = "https://github.com/spease/wpa-ctrl-rs"
 version = "0.4.0"
 authors = [ "Sauyon Lee <s@uyon.co>", "Steven Pease <peasteven@gmail.com>" ]
 
