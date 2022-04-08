@@ -292,6 +292,7 @@ impl WpaCtrlAttached {
 
 #[cfg(test)]
 mod test {
+    use serial_test::serial;
     use super::*;
 
     fn wpa_ctrl() -> WpaCtrl {
@@ -299,6 +300,7 @@ mod test {
     }
 
     #[test]
+    #[serial]
     fn attach() {
         wpa_ctrl()
             .attach()
@@ -312,17 +314,20 @@ mod test {
     }
 
     #[test]
+    #[serial]
     fn detach() {
         let wpa = wpa_ctrl().attach().unwrap();
         wpa.detach().unwrap();
     }
 
     #[test]
+    #[serial]
     fn builder() {
         wpa_ctrl();
     }
 
     #[test]
+    #[serial]
     fn request() {
         let mut wpa = wpa_ctrl();
         assert_eq!(wpa.request("PING").unwrap(), "PONG\n");
@@ -332,6 +337,7 @@ mod test {
     }
 
     #[test]
+    #[serial]
     fn recv() {
         let mut wpa = wpa_ctrl().attach().unwrap();
         assert_eq!(wpa.recv().unwrap(), None);
