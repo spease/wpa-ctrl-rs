@@ -8,8 +8,8 @@ version = "0.4.0"
 authors = [ "Sauyon Lee <s@uyon.co>", "Steven Pease <peasteven@gmail.com>" ]
 
 [dependencies]
-log = { version = "0.4.14", default-features = false }
-libc = { version = "0.2.101", default-features = false }
+log = { version = "0.4.16", default-features = false }
+libc = { version = "0.2.122", default-features = false }
 
 [dev-dependencies]
 serial_test = { version = "0.6.0", default-features = false }
