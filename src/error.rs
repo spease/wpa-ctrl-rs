@@ -2,9 +2,9 @@
 
 use std::{io, str};
 
-/// Error type used for some library functions
+/// The errors that may occur using `wpactrl`
 #[derive(Debug)]
-pub enum WpaError {
+pub enum Error {
     /// Represents all cases of `std::io::Error`.
     Io(io::Error),
 
@@ -21,48 +21,46 @@ pub enum WpaError {
     Wait
 }
 
-impl std::error::Error for WpaError {
+impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match *self {
-            WpaError::Attach => None,
-            WpaError::Detach => None,
-            WpaError::Wait => None,
-            WpaError::Io(ref source) => Some(source),
-            WpaError::Utf8ToStr(ref source) => Some(source),
+            Self::Attach|Self::Detach|Self::Wait => None,
+            Self::Io(ref source) => Some(source),
+            Self::Utf8ToStr(ref source) => Some(source),
         }
     }
 }
 
-impl std::fmt::Display for WpaError {
+impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match *self {
-            WpaError::Attach => {
+            Self::Attach => {
                 write!(f, "Failed to attach to wpasupplicant")
             }
-            WpaError::Detach => {
+            Self::Detach => {
                 write!(f, "Failed to detach from wpasupplicant")
             }
-            WpaError::Wait => {
+            Self::Wait => {
                 write!(f, "Unable to wait for response from wpasupplicant")
             }
-            WpaError::Io(ref err) => {
+            Self::Io(ref err) => {
                 write!(f, "Failed to execute the specified command: {}", err)
             }
-            WpaError::Utf8ToStr(ref err) => {
+            Self::Utf8ToStr(ref err) => {
                 write!(f, "Failed to parse UTF8 to string: {}", err)
             }
         }
     }
 }
 
-impl From<std::io::Error> for WpaError {
-    fn from(err: std::io::Error) -> WpaError {
-        WpaError::Io(err)
+impl From<std::io::Error> for Error {
+    fn from(err: std::io::Error) -> Self {
+        Self::Io(err)
     }
 }
 
-impl From<str::Utf8Error> for WpaError {
-    fn from(err: str::Utf8Error) -> WpaError {
-        WpaError::Utf8ToStr(err)
+impl From<str::Utf8Error> for Error {
+    fn from(err: str::Utf8Error) -> Self {
+        Self::Utf8ToStr(err)
     }
 }

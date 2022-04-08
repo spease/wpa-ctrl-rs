@@ -7,31 +7,32 @@ use std::os::unix::net::UnixDatagram;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use crate::error::WpaError;
+use crate::error::Error;
 
 const BUF_SIZE: usize = 10_240;
 const PATH_DEFAULT_CLIENT: &str = "/tmp";
 const PATH_DEFAULT_SERVER: &str = "/var/run/wpa_supplicant/wlan0";
 
-/// Builder object used to construct a `WpaCtrl` session
+/// Builder object used to construct a [`Client`] session
 #[derive(Default)]
-pub struct WpaCtrlBuilder {
+pub struct ClientBuilder {
     cli_path: Option<PathBuf>,
     ctrl_path: Option<PathBuf>,
 }
 
-impl WpaCtrlBuilder {
+impl ClientBuilder {
     /// A path-like object for this application's UNIX domain socket
     ///
     /// # Examples
     ///
     /// ```
-    /// use wpactrl::WpaCtrl;
-    /// let wpa = WpaCtrl::builder()
+    /// use wpactrl::Client;
+    /// let wpa = Client::builder()
     ///             .cli_path("/tmp")
     ///             .open()
     ///             .unwrap();
     /// ```
+    #[must_use]
     pub fn cli_path<I, P>(mut self, cli_path: I) -> Self
     where
         I: Into<Option<P>>,
@@ -42,17 +43,18 @@ impl WpaCtrlBuilder {
         self
     }
 
-    /// A path-like object for the wpasupplicant / hostap UNIX domain sockets
+    /// A path-like object for the `wpa_supplicant` / `hostapd` UNIX domain sockets
     ///
     /// # Examples
     ///
     /// ```
-    /// use wpactrl::WpaCtrl;
-    /// let wpa = WpaCtrl::builder()
+    /// use wpactrl::Client;
+    /// let wpa = Client::builder()
     ///             .ctrl_path("/var/run/wpa_supplicant/wlan0")
     ///             .open()
     ///             .unwrap();
     /// ```
+    #[must_use]
     pub fn ctrl_path<I, P>(mut self, ctrl_path: I) -> Self
     where
         I: Into<Option<P>>,
@@ -63,15 +65,18 @@ impl WpaCtrlBuilder {
         self
     }
 
-    /// Open a control interface to wpasupplicant.
+    /// Open a control interface to `wpa_supplicant` / `hostapd`.
     ///
     /// # Examples
     ///
     /// ```
-    /// use wpactrl::WpaCtrl;
-    /// let wpa = WpaCtrl::builder().open().unwrap();
+    /// use wpactrl::Client;
+    /// let wpa = Client::builder().open().unwrap();
     /// ```
-    pub fn open(self) -> Result<WpaCtrl> {
+    /// # Errors
+    ///
+    /// * [[`Error::Io`]] - Low-level I/O error
+    pub fn open(self) -> Result<Client> {
         let mut counter = 0;
         loop {
             counter += 1;
@@ -85,7 +90,7 @@ impl WpaCtrlBuilder {
                 Ok(socket) => {
                     socket.connect(self.ctrl_path.unwrap_or_else(|| PATH_DEFAULT_SERVER.into()))?;
                     socket.set_nonblocking(true)?;
-                    return Ok(WpaCtrl(WpaCtrlInternal {
+                    return Ok(Client(ClientInternal {
                         buffer: [0; BUF_SIZE],
                         handle: socket,
                         filepath: bind_filepath,
@@ -101,7 +106,7 @@ impl WpaCtrlBuilder {
     }
 }
 
-struct WpaCtrlInternal {
+struct ClientInternal {
     buffer: [u8; BUF_SIZE],
     handle: UnixDatagram,
     filepath: PathBuf,
@@ -130,11 +135,11 @@ fn select(fd: RawFd, duration: Duration) -> Result<bool> {
     if r >= 0 {
         Ok(r > 0)
     } else {
-        Err(WpaError::Wait)
+        Err(Error::Wait)
     }
 }
 
-impl WpaCtrlInternal {
+impl ClientInternal {
     /// Check if any messages are available
     pub fn pending(&mut self) -> Result<bool> {
         select(self.handle.as_raw_fd(), Duration::from_secs(0))
@@ -146,13 +151,13 @@ impl WpaCtrlInternal {
             let buf_len = self.handle.recv(&mut self.buffer)?;
             std::str::from_utf8(&self.buffer[0..buf_len])
                 .map(|s| Some(s.to_owned()))
-                .map_err(|e| e.into())
+                .map_err(std::convert::Into::into)
         } else {
             Ok(None)
         }
     }
 
-    /// Send a command to wpasupplicant / hostapd.
+    /// Send a command to `wpa_supplicant` / `hostapd`.
     fn request<F: FnMut(&str)>(&mut self, cmd: &str, mut cb: F) -> Result<String> {
         self.handle.send(cmd.as_bytes())?;
         loop {
@@ -161,7 +166,7 @@ impl WpaCtrlInternal {
                 Ok(len) => {
                     let s = std::str::from_utf8(&self.buffer[0..len])?;
                     if s.starts_with('<') {
-                        cb(s)
+                        cb(s);
                     } else {
                         return Ok(s.to_owned());
                     }
@@ -173,7 +178,7 @@ impl WpaCtrlInternal {
     }
 }
 
-impl Drop for WpaCtrlInternal {
+impl Drop for ClientInternal {
     fn drop(&mut self) {
         if let Err(e) = std::fs::remove_file(&self.filepath) {
             warn!("Unable to unlink {:?}", e);
@@ -181,19 +186,20 @@ impl Drop for WpaCtrlInternal {
     }
 }
 
-/// A connection to wpasupplicant / hostap
-pub struct WpaCtrl(WpaCtrlInternal);
+/// A connection to `wpa_supplicant` / `hostapd`
+pub struct Client(ClientInternal);
 
-impl WpaCtrl {
-    /// Creates a builder for a wpasupplicant / hostap connection
+impl Client {
+    /// Creates a builder for a `wpa_supplicant` / `hostapd` connection
     ///
     /// # Examples
     ///
     /// ```
-    /// let wpa = wpactrl::WpaCtrl::builder().open().unwrap();
+    /// let wpa = wpactrl::Client::builder().open().unwrap();
     /// ```
-    pub fn builder() -> WpaCtrlBuilder {
-        WpaCtrlBuilder::default()
+    #[must_use]
+    pub fn builder() -> ClientBuilder {
+        ClientBuilder::default()
     }
 
     /// Register as an event monitor for control interface messages
@@ -201,51 +207,71 @@ impl WpaCtrl {
     /// # Examples
     ///
     /// ```
-    /// let mut wpa = wpactrl::WpaCtrl::builder().open().unwrap();
+    /// let mut wpa = wpactrl::Client::builder().open().unwrap();
     /// let wpa_attached = wpa.attach().unwrap();
     /// ```
-    pub fn attach(mut self) -> Result<WpaCtrlAttached> {
+    ///
+    /// # Errors
+    ///
+    /// * [`Error::Attach`] - Unexpected (non-OK) response
+    /// * [`Error::Io`] - Low-level I/O error
+    /// * [`Error::Utf8ToStr`] - Corrupted message or message with non-UTF8 characters
+    /// * [`Error::Wait`] - Failed to wait on underlying Unix socket
+    pub fn attach(mut self) -> Result<ClientAttached> {
         // FIXME: None closure would be better
-        if self.0.request("ATTACH", |_: &str| ())? != "OK\n" {
-            Err(WpaError::Attach)
+        if self.0.request("ATTACH", |_: &str| ())? == "OK\n" {
+            Ok(ClientAttached(self.0, VecDeque::new()))
         } else {
-            Ok(WpaCtrlAttached(self.0, VecDeque::new()))
+            Err(Error::Attach)
         }
     }
 
-    /// Send a command to wpa_supplicant/hostapd.
+    /// Send a command to `wpa_supplicant` / `hostapd`.
     ///
-    /// Commands are generally identical to those used in wpa_cli,
-    /// except all uppercase (eg LIST_NETWORKS, SCAN, etc)
+    /// Commands are generally identical to those used in `wpa_cli`,
+    /// except all uppercase (eg `LIST_NETWORKS`, `SCAN`, etc)
     ///
     /// # Examples
     ///
     /// ```
-    /// let mut wpa = wpactrl::WpaCtrl::builder().open().unwrap();
+    /// let mut wpa = wpactrl::Client::builder().open().unwrap();
     /// assert_eq!(wpa.request("PING").unwrap(), "PONG\n");
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// * [`Error::Io`] - Low-level I/O error
+    /// * [`Error::Utf8ToStr`] - Corrupted message or message with non-UTF8 characters
+    /// * [`Error::Wait`] - Failed to wait on underlying Unix socket
     pub fn request(&mut self, cmd: &str) -> Result<String> {
         self.0.request(cmd, |_: &str| ())
     }
 }
 
-/// A connection to wpasupplicant / hostap that receives status messages
-pub struct WpaCtrlAttached(WpaCtrlInternal, VecDeque<String>);
+/// A connection to `wpa_supplicant` / `hostapd` that receives status messages
+pub struct ClientAttached(ClientInternal, VecDeque<String>);
 
-impl WpaCtrlAttached {
+impl ClientAttached {
     /// Stop listening for and discard any remaining control interface messages
     ///
     /// # Examples
     ///
     /// ```
-    /// let mut wpa = wpactrl::WpaCtrl::builder().open().unwrap().attach().unwrap();
+    /// let mut wpa = wpactrl::Client::builder().open().unwrap().attach().unwrap();
     /// wpa.detach().unwrap();
     /// ```
-    pub fn detach(mut self) -> Result<WpaCtrl> {
-        if self.0.request("DETACH", |_: &str| ())? != "OK\n" {
-            Err(WpaError::Detach)
+    ///
+    /// # Errors
+    ///
+    /// * [`Error::Detach`] - Unexpected (non-OK) response
+    /// * [`Error::Io`] - Low-level I/O error
+    /// * [`Error::Utf8ToStr`] - Corrupted message or message with non-UTF8 characters
+    /// * [`Error::Wait`] - Failed to wait on underlying Unix socket
+    pub fn detach(mut self) -> Result<Client> {
+        if self.0.request("DETACH", |_: &str| ())? == "OK\n" {
+            Ok(Client(self.0))
         } else {
-            Ok(WpaCtrl(self.0))
+            Err(Error::Detach)
         }
     }
 
@@ -257,9 +283,15 @@ impl WpaCtrlAttached {
     /// # Examples
     ///
     /// ```
-    /// let mut wpa = wpactrl::WpaCtrl::builder().open().unwrap().attach().unwrap();
+    /// let mut wpa = wpactrl::Client::builder().open().unwrap().attach().unwrap();
     /// assert_eq!(wpa.recv().unwrap(), None);
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// * [`Error::Io`] - Low-level I/O error
+    /// * [`Error::Utf8ToStr`] - Corrupted message or message with non-UTF8 characters
+    /// * [`Error::Wait`] - Failed to wait on underlying Unix socket
     pub fn recv(&mut self) -> Result<Option<String>> {
         if let Some(s) = self.1.pop_back() {
             Ok(Some(s))
@@ -268,10 +300,10 @@ impl WpaCtrlAttached {
         }
     }
 
-    /// Send a command to wpa_supplicant/hostapd.
+    /// Send a command to `wpa_supplicant` / `hostapd`.
     ///
-    /// Commands are generally identical to those used in wpa_cli,
-    /// except all uppercase (eg LIST_NETWORKS, SCAN, etc)
+    /// Commands are generally identical to those used in `wpa_cli`,
+    /// except all uppercase (eg `LIST_NETWORKS`, `SCAN`, etc)
     ///
     /// Control interface messages will be buffered as the command
     /// runs, and will be returned on the next call to recv.
@@ -279,9 +311,15 @@ impl WpaCtrlAttached {
     /// # Examples
     ///
     /// ```
-    /// let mut wpa = wpactrl::WpaCtrl::builder().open().unwrap();
+    /// let mut wpa = wpactrl::Client::builder().open().unwrap();
     /// assert_eq!(wpa.request("PING").unwrap(), "PONG\n");
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// * [`Error::Io`] - Low-level I/O error
+    /// * [`Error::Utf8ToStr`] - Corrupted message or message with non-UTF8 characters
+    /// * [`Error::Wait`] - Failed to wait on underlying Unix socket
     pub fn request(&mut self, cmd: &str) -> Result<String> {
         let mut messages = VecDeque::new();
         let r = self.0.request(cmd, |s: &str| messages.push_front(s.into()));
@@ -295,8 +333,8 @@ mod test {
     use serial_test::serial;
     use super::*;
 
-    fn wpa_ctrl() -> WpaCtrl {
-        WpaCtrl::builder().open().unwrap()
+    fn wpa_ctrl() -> Client {
+        Client::builder().open().unwrap()
     }
 
     #[test]

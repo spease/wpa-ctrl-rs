@@ -7,7 +7,7 @@
 //! # Example
 //!
 //! ```
-//! let mut wpa = wpactrl::WpaCtrl::builder().open().unwrap();
+//! let mut wpa = wpactrl::Client::builder().open().unwrap();
 //! println!("{}", wpa.request("LIST_NETWORKS").unwrap());
 //! ```
 //!
@@ -16,9 +16,9 @@
 
 mod error;
 mod wpactrl;
-pub use crate::wpactrl::{WpaCtrl, WpaCtrlAttached, WpaCtrlBuilder};
+pub use crate::wpactrl::{Client, ClientAttached, ClientBuilder};
 
-pub use crate::error::WpaError;
+pub use crate::error::Error;
 
-/// Result type used for the library
-pub type Result<T> = ::std::result::Result<T, WpaError>;
+/// A `Result` alias where the `Err` case is `wpactrl::Error`
+pub type Result<T> = ::std::result::Result<T, Error>;
