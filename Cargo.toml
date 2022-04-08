@@ -2,6 +2,8 @@
 name = "wpactrl"
 description = "wpa_supplicant control interface library"
 edition = "2021"
+categories = [ "api-bindings", "embedded", "network-programming", "operating-systems" ]
+keywords = [ "hostapd", "wpa_cli", "wpa_ctrl", "wpa_supplicant" ]
 license = "MIT"
 repository = "https://github.com/spease/wpa-ctrl-rs"
 version = "0.4.0"
