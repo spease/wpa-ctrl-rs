@@ -121,8 +121,8 @@ fn select(fd: RawFd, duration: Duration) -> Result<bool> {
             std::ptr::null_mut(),
             std::ptr::null_mut(),
             &mut libc::timeval {
-                tv_sec: duration.as_secs() as i64,
-                tv_usec: duration.subsec_micros() as i64,
+                tv_sec: duration.as_secs().try_into().unwrap(),
+                tv_usec: duration.subsec_micros().try_into().unwrap(),
             },
         )
     };
