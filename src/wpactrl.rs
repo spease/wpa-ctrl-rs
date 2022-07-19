@@ -178,6 +178,12 @@ impl ClientInternal {
     }
 }
 
+impl AsRawFd for ClientInternal {
+    fn as_raw_fd(&self) -> RawFd {
+        self.handle.as_raw_fd()
+    }
+}
+
 impl Drop for ClientInternal {
     fn drop(&mut self) {
         if let Err(e) = std::fs::remove_file(&self.filepath) {
@@ -245,6 +251,12 @@ impl Client {
     /// * [`Error::Wait`] - Failed to wait on underlying Unix socket
     pub fn request(&mut self, cmd: &str) -> Result<String> {
         self.0.request(cmd, |_: &str| ())
+    }
+}
+
+impl AsRawFd for Client {
+    fn as_raw_fd(&self) -> RawFd {
+        self.0.as_raw_fd()
     }
 }
 
@@ -325,6 +337,12 @@ impl ClientAttached {
         let r = self.0.request(cmd, |s: &str| messages.push_front(s.into()));
         self.1.extend(messages);
         r
+    }
+}
+
+impl AsRawFd for ClientAttached {
+    fn as_raw_fd(&self) -> RawFd {
+        self.0.as_raw_fd()
     }
 }
 
