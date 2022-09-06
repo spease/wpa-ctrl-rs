@@ -5,6 +5,7 @@ use std::collections::VecDeque;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::os::unix::net::UnixDatagram;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use crate::error::Error;
@@ -12,6 +13,9 @@ use crate::error::Error;
 const BUF_SIZE: usize = 10_240;
 const PATH_DEFAULT_CLIENT: &str = "/tmp";
 const PATH_DEFAULT_SERVER: &str = "/var/run/wpa_supplicant/wlan0";
+
+// Counter to avoid using the same file when creating multiple clients.
+static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 /// Builder object used to construct a [`Client`] session
 #[derive(Default)]
@@ -77,9 +81,10 @@ impl ClientBuilder {
     ///
     /// * [[`Error::Io`]] - Low-level I/O error
     pub fn open(self) -> Result<Client> {
-        let mut counter = 0;
+        let counter = COUNTER.fetch_add(1, Ordering::SeqCst);
+        let mut tries = 0;
         loop {
-            counter += 1;
+            tries += 1;
             let bind_filename = format!("wpa_ctrl_{}-{}", std::process::id(), counter);
             let bind_filepath = self
                 .cli_path
@@ -96,7 +101,7 @@ impl ClientBuilder {
                         filepath: bind_filepath,
                     }));
                 }
-                Err(ref e) if counter < 2 && e.kind() == std::io::ErrorKind::AddrInUse => {
+                Err(ref e) if tries < 2 && e.kind() == std::io::ErrorKind::AddrInUse => {
                     std::fs::remove_file(bind_filepath)?;
                     continue;
                 }
