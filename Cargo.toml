@@ -9,9 +9,13 @@ repository = "https://github.com/spease/wpa-ctrl-rs"
 version = "0.5.1"
 authors = [ "Sauyon Lee <s@uyon.co>", "Steven Pease <peasteven@gmail.com>" ]
 
+[features]
+async = ["dep:tokio"]
+
 [dependencies]
 log = { version = "0.4.16", default-features = false }
 libc = { version = "0.2.122", default-features = false }
+tokio = {version = "1.32", features = ["net"], optional = true }
 
 [dev-dependencies]
 serial_test = { version = "0.6.0", default-features = false }
