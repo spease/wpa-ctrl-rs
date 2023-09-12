@@ -3,9 +3,6 @@ use super::Result;
 use log::warn;
 use std::collections::VecDeque;
 use std::os::unix::io::{AsRawFd, RawFd};
-#[cfg(not(feature = "async"))]
-use std::os::unix::net::UnixDatagram;
-#[cfg(feature = "async")]
 use tokio::net::UnixDatagram;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -97,8 +94,6 @@ impl ClientBuilder {
             match UnixDatagram::bind(&bind_filepath) {
                 Ok(socket) => {
                     socket.connect(self.ctrl_path.unwrap_or_else(|| PATH_DEFAULT_SERVER.into()))?;
-                    #[cfg(not(feature = "async"))]
-                    socket.set_nonblocking(true)?;
                     return Ok(Client(ClientInternal {
                         buffer: [0; BUF_SIZE],
                         handle: socket,
@@ -115,7 +110,7 @@ impl ClientBuilder {
     }
 }
 
-struct ClientInternal {
+pub (crate) struct ClientInternal {
     buffer: [u8; BUF_SIZE],
     handle: UnixDatagram,
     filepath: PathBuf,
@@ -155,8 +150,7 @@ impl ClientInternal {
     }
 
     /// Receive a message
-    #[cfg(feature = "async")]
-    pub async fn recv(&mut self) -> Result<Option<String>> {
+    pub (crate) async fn recv(&mut self) -> Result<Option<String>> {
         if self.pending()? {
             let buf_len = self.handle.recv(&mut self.buffer).await?;
             std::str::from_utf8(&self.buffer[0..buf_len])
@@ -167,43 +161,8 @@ impl ClientInternal {
         }
     }
 
-    /// Receive a message
-    #[cfg(not(feature = "async"))]
-    pub fn recv(&mut self) -> Result<Option<String>> {
-        if self.pending()? {
-            let buf_len = self.handle.recv(&mut self.buffer)?;
-            std::str::from_utf8(&self.buffer[0..buf_len])
-                .map(|s| Some(s.to_owned()))
-                .map_err(std::convert::Into::into)
-        } else {
-            Ok(None)
-        }
-    }
-
     /// Send a command to `wpa_supplicant` / `hostapd`.
-    #[cfg(not(feature = "async"))]
-    fn request<F: FnMut(&str)>(&mut self, cmd: &str, mut cb: F) -> Result<String> {
-        self.handle.send(cmd.as_bytes())?;
-        loop {
-            select(self.handle.as_raw_fd(), Duration::from_secs(10))?;
-            match self.handle.recv(&mut self.buffer) {
-                Ok(len) => {
-                    let s = std::str::from_utf8(&self.buffer[0..len])?;
-                    if s.starts_with('<') {
-                        cb(s);
-                    } else {
-                        return Ok(s.to_owned());
-                    }
-                }
-                Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                Err(e) => return Err(e.into()),
-            }
-        }
-    }
-
-    /// Send a command to `wpa_supplicant` / `hostapd`.
-    #[cfg(feature = "async")]
-    async fn request<F: FnMut(&str)>(&mut self, cmd: &str, mut cb: F) -> Result<String> {
+    pub (crate) async fn request<F: FnMut(&str)>(&mut self, cmd: &str, mut cb: F) -> Result<String> {
         self.handle.send(cmd.as_bytes()).await?;
         loop {
             select(self.handle.as_raw_fd(), Duration::from_secs(10))?;
@@ -262,32 +221,6 @@ impl Client {
     /// * [`Error::Io`] - Low-level I/O error
     /// * [`Error::Utf8ToStr`] - Corrupted message or message with non-UTF8 characters
     /// * [`Error::Wait`] - Failed to wait on underlying Unix socket
-    #[cfg(not(feature = "async"))]
-    pub fn attach(mut self) -> Result<ClientAttached> {
-        // FIXME: None closure would be better
-        if self.0.request("ATTACH", |_: &str| ())? == "OK\n" {
-            Ok(ClientAttached(self.0, VecDeque::new()))
-        } else {
-            Err(Error::Attach)
-        }
-    }
-
-    /// Register as an event monitor for control interface messages
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let mut wpa = wpactrl::Client::builder().open().unwrap();
-    /// let wpa_attached = wpa.attach().unwrap();
-    /// ```
-    ///
-    /// # Errors
-    ///
-    /// * [`Error::Attach`] - Unexpected (non-OK) response
-    /// * [`Error::Io`] - Low-level I/O error
-    /// * [`Error::Utf8ToStr`] - Corrupted message or message with non-UTF8 characters
-    /// * [`Error::Wait`] - Failed to wait on underlying Unix socket
-    #[cfg(feature = "async")]
     pub async fn attach(mut self) -> Result<ClientAttached> {
         // FIXME: None closure would be better
         if self.0.request("ATTACH", |_: &str| ()).await? == "OK\n" {
@@ -314,29 +247,6 @@ impl Client {
     /// * [`Error::Io`] - Low-level I/O error
     /// * [`Error::Utf8ToStr`] - Corrupted message or message with non-UTF8 characters
     /// * [`Error::Wait`] - Failed to wait on underlying Unix socket
-    #[cfg(not(feature = "async"))]
-    pub fn request(&mut self, cmd: &str) -> Result<String> {
-        self.0.request(cmd, |_: &str| ())
-    }
-
-    /// Send a command to `wpa_supplicant` / `hostapd`.
-    ///
-    /// Commands are generally identical to those used in `wpa_cli`,
-    /// except all uppercase (eg `LIST_NETWORKS`, `SCAN`, etc)
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let mut wpa = wpactrl::Client::builder().open().unwrap();
-    /// assert_eq!(wpa.request("PING").unwrap(), "PONG\n");
-    /// ```
-    ///
-    /// # Errors
-    ///
-    /// * [`Error::Io`] - Low-level I/O error
-    /// * [`Error::Utf8ToStr`] - Corrupted message or message with non-UTF8 characters
-    /// * [`Error::Wait`] - Failed to wait on underlying Unix socket
-    #[cfg(feature = "async")]
     pub async fn request(&mut self, cmd: &str) -> Result<String> {
         self.0.request(cmd, |_: &str| ()).await
     }
@@ -346,30 +256,6 @@ impl Client {
 pub struct ClientAttached(ClientInternal, VecDeque<String>);
 
 impl ClientAttached {
-    /// Stop listening for and discard any remaining control interface messages
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let mut wpa = wpactrl::Client::builder().open().unwrap().attach().unwrap();
-    /// wpa.detach().unwrap();
-    /// ```
-    ///
-    /// # Errors
-    ///
-    /// * [`Error::Detach`] - Unexpected (non-OK) response
-    /// * [`Error::Io`] - Low-level I/O error
-    /// * [`Error::Utf8ToStr`] - Corrupted message or message with non-UTF8 characters
-    /// * [`Error::Wait`] - Failed to wait on underlying Unix socket
-    #[cfg(not(feature = "async"))]
-    pub fn detach(mut self) -> Result<Client> {
-        
-        if self.0.request("DETACH", |_: &str| ())? == "OK\n" {
-            Ok(Client(self.0))
-        } else {
-            Err(Error::Detach)
-        }
-    }
 
     /// Stop listening for and discard any remaining control interface messages
     ///
@@ -386,7 +272,6 @@ impl ClientAttached {
     /// * [`Error::Io`] - Low-level I/O error
     /// * [`Error::Utf8ToStr`] - Corrupted message or message with non-UTF8 characters
     /// * [`Error::Wait`] - Failed to wait on underlying Unix socket
-    #[cfg(feature = "async")]
     pub async fn detach(mut self) -> Result<Client> {
         
         if self.0.request("DETACH", |_: &str| ()).await? == "OK\n" {
@@ -413,7 +298,6 @@ impl ClientAttached {
     /// * [`Error::Io`] - Low-level I/O error
     /// * [`Error::Utf8ToStr`] - Corrupted message or message with non-UTF8 characters
     /// * [`Error::Wait`] - Failed to wait on underlying Unix socket
-    #[cfg(feature = "async")]
     pub async fn recv(&mut self) -> Result<Option<String>> {
         if let Some(s) = self.1.pop_back() {
             Ok(Some(s))
@@ -422,32 +306,6 @@ impl ClientAttached {
         }
     }
 
-    /// Receive the next control interface message.
-    ///
-    /// Note that multiple control interface messages can be pending;
-    /// call this function repeatedly until it returns None to get all of them.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let mut wpa = wpactrl::Client::builder().open().unwrap().attach().unwrap();
-    /// assert_eq!(wpa.recv().unwrap(), None);
-    /// ```
-    ///
-    /// # Errors
-    ///
-    /// * [`Error::Io`] - Low-level I/O error
-    /// * [`Error::Utf8ToStr`] - Corrupted message or message with non-UTF8 characters
-    /// * [`Error::Wait`] - Failed to wait on underlying Unix socket
-    #[cfg(not(feature = "async"))]
-    pub fn recv(&mut self) -> Result<Option<String>> {
-        if let Some(s) = self.1.pop_back() {
-            Ok(Some(s))
-        } else {
-            self.0.recv()
-        }
-    }
-
     /// Send a command to `wpa_supplicant` / `hostapd`.
     ///
     /// Commands are generally identical to those used in `wpa_cli`,
@@ -468,7 +326,6 @@ impl ClientAttached {
     /// * [`Error::Io`] - Low-level I/O error
     /// * [`Error::Utf8ToStr`] - Corrupted message or message with non-UTF8 characters
     /// * [`Error::Wait`] - Failed to wait on underlying Unix socket
-    #[cfg(feature = "async")]
     pub async fn request(&mut self, cmd: &str) -> Result<String> {
         let mut messages = VecDeque::new();
         let r = self.0.request(cmd, |s: &str| messages.push_front(s.into())).await;
@@ -476,33 +333,6 @@ impl ClientAttached {
         r
     }
 
-    /// Send a command to `wpa_supplicant` / `hostapd`.
-    ///
-    /// Commands are generally identical to those used in `wpa_cli`,
-    /// except all uppercase (eg `LIST_NETWORKS`, `SCAN`, etc)
-    ///
-    /// Control interface messages will be buffered as the command
-    /// runs, and will be returned on the next call to recv.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let mut wpa = wpactrl::Client::builder().open().unwrap();
-    /// assert_eq!(wpa.request("PING").unwrap(), "PONG\n");
-    /// ```
-    ///
-    /// # Errors
-    ///
-    /// * [`Error::Io`] - Low-level I/O error
-    /// * [`Error::Utf8ToStr`] - Corrupted message or message with non-UTF8 characters
-    /// * [`Error::Wait`] - Failed to wait on underlying Unix socket
-    #[cfg(not(feature = "async"))]
-    pub fn request(&mut self, cmd: &str) -> Result<String> {
-        let mut messages = VecDeque::new();
-        let r = self.0.request(cmd, |s: &str| messages.push_front(s.into()));
-        self.1.extend(messages);
-        r
-    }
 }
 
 #[cfg(test)]

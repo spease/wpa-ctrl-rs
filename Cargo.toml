@@ -11,11 +11,17 @@ authors = [ "Sauyon Lee <s@uyon.co>", "Steven Pease <peasteven@gmail.com>" ]
 
 [features]
 async = ["dep:tokio"]
+serde = ["dep:serde", "dep:serde_derive"]
+default = ["async"]
+sync = []
 
 [dependencies]
 log = { version = "0.4.16", default-features = false }
 libc = { version = "0.2.122", default-features = false }
 tokio = {version = "1.32", features = ["net"], optional = true }
-
+serde = {version = "1.0.188", optional = true}
+serde_derive = {version = "1.0.188", optional = true }
+err-derive = "*"
+futures = { version = "0.3.28", features = ["executor"]}
 [dev-dependencies]
 serial_test = { version = "0.6.0", default-features = false }
