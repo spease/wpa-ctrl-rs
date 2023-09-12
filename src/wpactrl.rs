@@ -337,6 +337,7 @@ impl ClientAttached {
 
 #[cfg(test)]
 mod test {
+    use futures::executor::block_on;
     use serial_test::serial;
     use super::*;
 
@@ -347,22 +348,30 @@ mod test {
     #[test]
     #[serial]
     fn attach() {
-        wpa_ctrl()
-            .attach()
-            .unwrap()
-            .detach()
-            .unwrap()
-            .attach()
-            .unwrap()
-            .detach()
-            .unwrap();
+        block_on(async move {
+            wpa_ctrl()
+                .attach()
+                .await
+                .unwrap()
+                .detach()
+                .await
+                .unwrap()
+                .attach()
+                .await
+                .unwrap()
+                .detach()
+                .await
+                .unwrap();
+        })
     }
 
     #[test]
     #[serial]
     fn detach() {
-        let wpa = wpa_ctrl().attach().unwrap();
-        wpa.detach().unwrap();
+        block_on(async move {
+            let wpa = wpa_ctrl().attach().await.unwrap();
+            wpa.detach().await.unwrap();
+        })
     }
 
     #[test]
@@ -374,28 +383,32 @@ mod test {
     #[test]
     #[serial]
     fn request() {
-        let mut wpa = wpa_ctrl();
-        assert_eq!(wpa.request("PING").unwrap(), "PONG\n");
-        let mut wpa_attached = wpa.attach().unwrap();
-        // FIXME: This may not trigger the callback
-        assert_eq!(wpa_attached.request("PING").unwrap(), "PONG\n");
+        block_on(async move {
+            let mut wpa = wpa_ctrl();
+            assert_eq!(wpa.request("PING").await.unwrap(), "PONG\n");
+            let mut wpa_attached = wpa.attach().await.unwrap();
+            // FIXME: This may not trigger the callback
+            assert_eq!(wpa_attached.request("PING").await.unwrap(), "PONG\n");
+        });
     }
 
     #[test]
     #[serial]
     fn recv() {
-        let mut wpa = wpa_ctrl().attach().unwrap();
-        assert_eq!(wpa.recv().unwrap(), None);
-        assert_eq!(wpa.request("SCAN").unwrap(), "OK\n");
-        loop {
-            match wpa.recv().unwrap() {
-                Some(s) => {
-                    assert_eq!(&s[3..], "CTRL-EVENT-SCAN-STARTED ");
-                    break;
+        block_on(async move {
+            let mut wpa = wpa_ctrl().attach().await.unwrap();
+            assert_eq!(wpa.recv().await.unwrap(), None);
+            assert_eq!(wpa.request("SCAN").await.unwrap(), "OK\n");
+            loop {
+                match wpa.recv().await.unwrap() {
+                    Some(s) => {
+                        assert_eq!(&s[3..], "CTRL-EVENT-SCAN-STARTED ");
+                        break;
+                    }
+                    None => std::thread::sleep(std::time::Duration::from_millis(10)),
                 }
-                None => std::thread::sleep(std::time::Duration::from_millis(10)),
             }
-        }
-        wpa.detach().unwrap();
+            wpa.detach().await.unwrap();
+        })
     }
 }
