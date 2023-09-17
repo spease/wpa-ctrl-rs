@@ -19,7 +19,7 @@ mod wpactrl;
 /// enables syncronous operation of this crate
 #[cfg(feature = "sync")]
 pub mod sync;
-//pub mod hostapd;
+pub mod hostapd;
 pub use crate::wpactrl::{Client, ClientAttached, ClientBuilder};
 
 pub use crate::error::Error;
