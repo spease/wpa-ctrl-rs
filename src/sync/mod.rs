@@ -1,9 +1,8 @@
 use crate::Result;
-use std::collections::VecDeque;
-use crate::{Error, wpactrl::ClientInternal, ClientBuilder};
+use crate::{ClientBuilder};
 use futures::executor::block_on;
 /// A connection to `wpa_supplicant` / `hostapd`
-pub struct Client(ClientInternal);
+pub struct Client(crate::Client);
 
 impl Client {
     /// Creates a builder for a `wpa_supplicant` / `hostapd` connection
@@ -33,13 +32,8 @@ impl Client {
     /// * [`Error::Io`] - Low-level I/O error
     /// * [`Error::Utf8ToStr`] - Corrupted message or message with non-UTF8 characters
     /// * [`Error::Wait`] - Failed to wait on underlying Unix socket
-    pub fn attach(mut self) -> Result<ClientAttached> {
-        // FIXME: None closure would be better
-        if block_on(self.0.request("ATTACH", |_: &str| ()))? == "OK\n" {
-            Ok(ClientAttached(self.0, VecDeque::new()))
-        } else {
-            Err(Error::Attach)
-        }
+    pub fn attach(self) -> Result<ClientAttached> {
+        Ok(ClientAttached(block_on(self.0.attach())?))
     }
 
     /// Send a command to `wpa_supplicant` / `hostapd`.
@@ -60,12 +54,12 @@ impl Client {
     /// * [`Error::Utf8ToStr`] - Corrupted message or message with non-UTF8 characters
     /// * [`Error::Wait`] - Failed to wait on underlying Unix socket
     pub fn request(&mut self, cmd: &str) -> Result<String> {
-        block_on(self.0.request(cmd, |_: &str| ()))
+        block_on(self.0.request(cmd))
     }
 }
 
 /// A connection to `wpa_supplicant` / `hostapd` that receives status messages
-pub struct ClientAttached(ClientInternal, VecDeque<String>);
+pub struct ClientAttached(crate::ClientAttached);
 
 impl ClientAttached {
     /// Stop listening for and discard any remaining control interface messages
@@ -83,13 +77,8 @@ impl ClientAttached {
     /// * [`Error::Io`] - Low-level I/O error
     /// * [`Error::Utf8ToStr`] - Corrupted message or message with non-UTF8 characters
     /// * [`Error::Wait`] - Failed to wait on underlying Unix socket
-    pub fn detach(mut self) -> Result<Client> {
-        
-        if block_on(self.0.request("DETACH", |_: &str| ()))? == "OK\n" {
-            Ok(Client(self.0))
-        } else {
-            Err(Error::Detach)
-        }
+    pub fn detach(self) -> Result<Client> {
+        Ok(Client(block_on(self.0.detach())?))
     }
 
     /// Receive the next control interface message.
@@ -110,11 +99,7 @@ impl ClientAttached {
     /// * [`Error::Utf8ToStr`] - Corrupted message or message with non-UTF8 characters
     /// * [`Error::Wait`] - Failed to wait on underlying Unix socket
     pub fn recv(&mut self) -> Result<Option<String>> {
-        if let Some(s) = self.1.pop_back() {
-            Ok(Some(s))
-        } else {
-            block_on(self.0.recv())
-        }
+        block_on(self.0.recv())
     }
 
     /// Send a command to `wpa_supplicant` / `hostapd`.
@@ -138,9 +123,6 @@ impl ClientAttached {
     /// * [`Error::Utf8ToStr`] - Corrupted message or message with non-UTF8 characters
     /// * [`Error::Wait`] - Failed to wait on underlying Unix socket
     pub fn request(&mut self, cmd: &str) -> Result<String> {
-        let mut messages = VecDeque::new();
-        let r = block_on(self.0.request(cmd, |s: &str| messages.push_front(s.into())));
-        self.1.extend(messages);
-        r
+        block_on(self.0.request(cmd))
     }
 }

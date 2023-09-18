@@ -1,4 +1,5 @@
-#![warn(missing_docs)]
+#![deny(missing_docs)]
+#![deny(dead_code)]
 //! A pure-Rust lowlevel library for controlling wpasupplicant remotely
 //!
 //! Note that in order to connect to wpasupplicant, you may need
@@ -19,7 +20,6 @@ mod wpactrl;
 /// enables syncronous operation of this crate
 #[cfg(feature = "sync")]
 pub mod sync;
-pub mod hostapd;
 pub use crate::wpactrl::{Client, ClientAttached, ClientBuilder};
 
 pub use crate::error::Error;
