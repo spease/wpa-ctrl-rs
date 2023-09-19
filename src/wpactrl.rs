@@ -1,12 +1,14 @@
 #![deny(missing_docs)]
 use super::Result;
 use log::warn;
+use async_trait::async_trait;
 use std::collections::VecDeque;
 use std::os::unix::io::{AsRawFd, RawFd};
-use std::os::unix::net::UnixDatagram;
+use tokio::net::UnixDatagram;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
+use crate::WPAClient;
 
 use crate::error::Error;
 
@@ -94,7 +96,6 @@ impl ClientBuilder {
             match UnixDatagram::bind(&bind_filepath) {
                 Ok(socket) => {
                     socket.connect(self.ctrl_path.unwrap_or_else(|| PATH_DEFAULT_SERVER.into()))?;
-                    socket.set_nonblocking(true)?;
                     return Ok(Client(ClientInternal {
                         buffer: [0; BUF_SIZE],
                         handle: socket,
@@ -111,7 +112,7 @@ impl ClientBuilder {
     }
 }
 
-struct ClientInternal {
+pub (crate) struct ClientInternal {
     buffer: [u8; BUF_SIZE],
     handle: UnixDatagram,
     filepath: PathBuf,
@@ -151,9 +152,9 @@ impl ClientInternal {
     }
 
     /// Receive a message
-    pub fn recv(&mut self) -> Result<Option<String>> {
+    pub (crate) async fn recv(&mut self) -> Result<Option<String>> {
         if self.pending()? {
-            let buf_len = self.handle.recv(&mut self.buffer)?;
+            let buf_len = self.handle.recv(&mut self.buffer).await?;
             std::str::from_utf8(&self.buffer[0..buf_len])
                 .map(|s| Some(s.to_owned()))
                 .map_err(std::convert::Into::into)
@@ -163,11 +164,11 @@ impl ClientInternal {
     }
 
     /// Send a command to `wpa_supplicant` / `hostapd`.
-    fn request<F: FnMut(&str)>(&mut self, cmd: &str, mut cb: F) -> Result<String> {
-        self.handle.send(cmd.as_bytes())?;
+    pub (crate) async fn request<F: FnMut(&str)>(&mut self, cmd: &str, mut cb: F) -> Result<String> {
+        self.handle.send(cmd.as_bytes()).await?;
         loop {
             select(self.handle.as_raw_fd(), Duration::from_secs(10))?;
-            match self.handle.recv(&mut self.buffer) {
+            match self.handle.recv(&mut self.buffer).await {
                 Ok(len) => {
                     let s = std::str::from_utf8(&self.buffer[0..len])?;
                     if s.starts_with('<') {
@@ -222,34 +223,20 @@ impl Client {
     /// * [`Error::Io`] - Low-level I/O error
     /// * [`Error::Utf8ToStr`] - Corrupted message or message with non-UTF8 characters
     /// * [`Error::Wait`] - Failed to wait on underlying Unix socket
-    pub fn attach(mut self) -> Result<ClientAttached> {
+    pub async fn attach(mut self) -> Result<ClientAttached> {
         // FIXME: None closure would be better
-        if self.0.request("ATTACH", |_: &str| ())? == "OK\n" {
+        if self.0.request("ATTACH", |_: &str| ()).await? == "OK\n" {
             Ok(ClientAttached(self.0, VecDeque::new()))
         } else {
             Err(Error::Attach)
         }
     }
+}
 
-    /// Send a command to `wpa_supplicant` / `hostapd`.
-    ///
-    /// Commands are generally identical to those used in `wpa_cli`,
-    /// except all uppercase (eg `LIST_NETWORKS`, `SCAN`, etc)
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let mut wpa = wpactrl::Client::builder().open().unwrap();
-    /// assert_eq!(wpa.request("PING").unwrap(), "PONG\n");
-    /// ```
-    ///
-    /// # Errors
-    ///
-    /// * [`Error::Io`] - Low-level I/O error
-    /// * [`Error::Utf8ToStr`] - Corrupted message or message with non-UTF8 characters
-    /// * [`Error::Wait`] - Failed to wait on underlying Unix socket
-    pub fn request(&mut self, cmd: &str) -> Result<String> {
-        self.0.request(cmd, |_: &str| ())
+#[async_trait]
+impl WPAClient for Client {
+    async fn request(&mut self, cmd: &str) -> Result<String> {
+        self.0.request(cmd, |_: &str| ()).await
     }
 }
 
@@ -257,6 +244,7 @@ impl Client {
 pub struct ClientAttached(ClientInternal, VecDeque<String>);
 
 impl ClientAttached {
+
     /// Stop listening for and discard any remaining control interface messages
     ///
     /// # Examples
@@ -272,8 +260,9 @@ impl ClientAttached {
     /// * [`Error::Io`] - Low-level I/O error
     /// * [`Error::Utf8ToStr`] - Corrupted message or message with non-UTF8 characters
     /// * [`Error::Wait`] - Failed to wait on underlying Unix socket
-    pub fn detach(mut self) -> Result<Client> {
-        if self.0.request("DETACH", |_: &str| ())? == "OK\n" {
+    pub async fn detach(mut self) -> Result<Client> {
+        
+        if self.0.request("DETACH", |_: &str| ()).await? == "OK\n" {
             Ok(Client(self.0))
         } else {
             Err(Error::Detach)
@@ -297,37 +286,20 @@ impl ClientAttached {
     /// * [`Error::Io`] - Low-level I/O error
     /// * [`Error::Utf8ToStr`] - Corrupted message or message with non-UTF8 characters
     /// * [`Error::Wait`] - Failed to wait on underlying Unix socket
-    pub fn recv(&mut self) -> Result<Option<String>> {
+    pub async fn recv(&mut self) -> Result<Option<String>> {
         if let Some(s) = self.1.pop_back() {
             Ok(Some(s))
         } else {
-            self.0.recv()
+            self.0.recv().await
         }
     }
+}
 
-    /// Send a command to `wpa_supplicant` / `hostapd`.
-    ///
-    /// Commands are generally identical to those used in `wpa_cli`,
-    /// except all uppercase (eg `LIST_NETWORKS`, `SCAN`, etc)
-    ///
-    /// Control interface messages will be buffered as the command
-    /// runs, and will be returned on the next call to recv.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let mut wpa = wpactrl::Client::builder().open().unwrap();
-    /// assert_eq!(wpa.request("PING").unwrap(), "PONG\n");
-    /// ```
-    ///
-    /// # Errors
-    ///
-    /// * [`Error::Io`] - Low-level I/O error
-    /// * [`Error::Utf8ToStr`] - Corrupted message or message with non-UTF8 characters
-    /// * [`Error::Wait`] - Failed to wait on underlying Unix socket
-    pub fn request(&mut self, cmd: &str) -> Result<String> {
+#[async_trait]
+impl WPAClient for ClientAttached {
+    async fn request(&mut self, cmd: &str) -> Result<String> {
         let mut messages = VecDeque::new();
-        let r = self.0.request(cmd, |s: &str| messages.push_front(s.into()));
+        let r = self.0.request(cmd, |s: &str| messages.push_front(s.into())).await;
         self.1.extend(messages);
         r
     }
@@ -335,6 +307,7 @@ impl ClientAttached {
 
 #[cfg(test)]
 mod test {
+    use futures::executor::block_on;
     use serial_test::serial;
     use super::*;
 
@@ -345,22 +318,30 @@ mod test {
     #[test]
     #[serial]
     fn attach() {
-        wpa_ctrl()
-            .attach()
-            .unwrap()
-            .detach()
-            .unwrap()
-            .attach()
-            .unwrap()
-            .detach()
-            .unwrap();
+        block_on(async move {
+            wpa_ctrl()
+                .attach()
+                .await
+                .unwrap()
+                .detach()
+                .await
+                .unwrap()
+                .attach()
+                .await
+                .unwrap()
+                .detach()
+                .await
+                .unwrap();
+        })
     }
 
     #[test]
     #[serial]
     fn detach() {
-        let wpa = wpa_ctrl().attach().unwrap();
-        wpa.detach().unwrap();
+        block_on(async move {
+            let wpa = wpa_ctrl().attach().await.unwrap();
+            wpa.detach().await.unwrap();
+        })
     }
 
     #[test]
@@ -372,28 +353,32 @@ mod test {
     #[test]
     #[serial]
     fn request() {
-        let mut wpa = wpa_ctrl();
-        assert_eq!(wpa.request("PING").unwrap(), "PONG\n");
-        let mut wpa_attached = wpa.attach().unwrap();
-        // FIXME: This may not trigger the callback
-        assert_eq!(wpa_attached.request("PING").unwrap(), "PONG\n");
+        block_on(async move {
+            let mut wpa = wpa_ctrl();
+            assert_eq!(wpa.request("PING").await.unwrap(), "PONG\n");
+            let mut wpa_attached = wpa.attach().await.unwrap();
+            // FIXME: This may not trigger the callback
+            assert_eq!(wpa_attached.request("PING").await.unwrap(), "PONG\n");
+        });
     }
 
     #[test]
     #[serial]
     fn recv() {
-        let mut wpa = wpa_ctrl().attach().unwrap();
-        assert_eq!(wpa.recv().unwrap(), None);
-        assert_eq!(wpa.request("SCAN").unwrap(), "OK\n");
-        loop {
-            match wpa.recv().unwrap() {
-                Some(s) => {
-                    assert_eq!(&s[3..], "CTRL-EVENT-SCAN-STARTED ");
-                    break;
+        block_on(async move {
+            let mut wpa = wpa_ctrl().attach().await.unwrap();
+            assert_eq!(wpa.recv().await.unwrap(), None);
+            assert_eq!(wpa.request("SCAN").await.unwrap(), "OK\n");
+            loop {
+                match wpa.recv().await.unwrap() {
+                    Some(s) => {
+                        assert_eq!(&s[3..], "CTRL-EVENT-SCAN-STARTED ");
+                        break;
+                    }
+                    None => std::thread::sleep(std::time::Duration::from_millis(10)),
                 }
-                None => std::thread::sleep(std::time::Duration::from_millis(10)),
             }
-        }
-        wpa.detach().unwrap();
+            wpa.detach().await.unwrap();
+        })
     }
 }
