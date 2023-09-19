@@ -1,12 +1,14 @@
 #![deny(missing_docs)]
 use super::Result;
 use log::warn;
+use async_trait::async_trait;
 use std::collections::VecDeque;
 use std::os::unix::io::{AsRawFd, RawFd};
 use tokio::net::UnixDatagram;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
+use crate::WPAClient;
 
 use crate::error::Error;
 
@@ -229,25 +231,11 @@ impl Client {
             Err(Error::Attach)
         }
     }
+}
 
-    /// Send a command to `wpa_supplicant` / `hostapd`.
-    ///
-    /// Commands are generally identical to those used in `wpa_cli`,
-    /// except all uppercase (eg `LIST_NETWORKS`, `SCAN`, etc)
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let mut wpa = wpactrl::Client::builder().open().unwrap();
-    /// assert_eq!(wpa.request("PING").unwrap(), "PONG\n");
-    /// ```
-    ///
-    /// # Errors
-    ///
-    /// * [`Error::Io`] - Low-level I/O error
-    /// * [`Error::Utf8ToStr`] - Corrupted message or message with non-UTF8 characters
-    /// * [`Error::Wait`] - Failed to wait on underlying Unix socket
-    pub async fn request(&mut self, cmd: &str) -> Result<String> {
+#[async_trait]
+impl WPAClient for Client {
+    async fn request(&mut self, cmd: &str) -> Result<String> {
         self.0.request(cmd, |_: &str| ()).await
     }
 }
@@ -305,34 +293,16 @@ impl ClientAttached {
             self.0.recv().await
         }
     }
+}
 
-    /// Send a command to `wpa_supplicant` / `hostapd`.
-    ///
-    /// Commands are generally identical to those used in `wpa_cli`,
-    /// except all uppercase (eg `LIST_NETWORKS`, `SCAN`, etc)
-    ///
-    /// Control interface messages will be buffered as the command
-    /// runs, and will be returned on the next call to recv.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let mut wpa = wpactrl::Client::builder().open().unwrap();
-    /// assert_eq!(wpa.request("PING").unwrap(), "PONG\n");
-    /// ```
-    ///
-    /// # Errors
-    ///
-    /// * [`Error::Io`] - Low-level I/O error
-    /// * [`Error::Utf8ToStr`] - Corrupted message or message with non-UTF8 characters
-    /// * [`Error::Wait`] - Failed to wait on underlying Unix socket
-    pub async fn request(&mut self, cmd: &str) -> Result<String> {
+#[async_trait]
+impl WPAClient for ClientAttached {
+    async fn request(&mut self, cmd: &str) -> Result<String> {
         let mut messages = VecDeque::new();
         let r = self.0.request(cmd, |s: &str| messages.push_front(s.into())).await;
         self.1.extend(messages);
         r
     }
-
 }
 
 #[cfg(test)]
