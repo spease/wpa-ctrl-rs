@@ -37,9 +37,10 @@ impl ClientBuilder {
     /// let wpa = Client::builder()
     ///             .cli_path("/tmp")
     ///             .open()
-    ///             .await
-    ///             .unwrap();
-    /// # })
+    ///             .await?;
+    /// # Ok::<_,wpactrl::Error>(())
+    /// # })?;
+    /// # Ok::<_,wpactrl::Error>(())
     /// ```
     #[must_use]
     pub fn cli_path<I, P>(mut self, cli_path: I) -> Self
@@ -62,9 +63,10 @@ impl ClientBuilder {
     /// let wpa = Client::builder()
     ///             .ctrl_path("/var/run/wpa_supplicant/wlan0")
     ///             .open()
-    ///             .await
-    ///             .unwrap();
-    /// # })
+    ///             .await?;
+    /// # Ok::<_,wpactrl::Error>(())
+    /// # })?;
+    /// # Ok::<_,wpactrl::Error>(())
     /// ```
     #[must_use]
     pub fn ctrl_path<I, P>(mut self, ctrl_path: I) -> Self
@@ -84,8 +86,10 @@ impl ClientBuilder {
     /// ```
     /// # tokio_test::block_on(async {
     /// use wpactrl::Client;
-    /// let wpa = Client::builder().open().await.unwrap();
-    /// # })
+    /// let wpa = Client::builder().open().await?;
+    /// # Ok::<_,wpactrl::Error>(())
+    /// # })?;
+    /// # Ok::<_,wpactrl::Error>(())
     /// ```
     /// # Errors
     ///
@@ -211,8 +215,10 @@ impl Client {
     ///
     /// ```
     /// # tokio_test::block_on(async {
-    /// let wpa = wpactrl::Client::builder().open().await.unwrap();
-    /// # })
+    /// let wpa = wpactrl::Client::builder().open().await?;
+    /// # Ok::<_,wpactrl::Error>(())
+    /// # })?;
+    /// # Ok::<_,wpactrl::Error>(())
     /// ```
     #[must_use]
     pub fn builder() -> ClientBuilder {
@@ -225,9 +231,11 @@ impl Client {
     ///
     /// ```
     /// # tokio_test::block_on(async {
-    /// let mut wpa = wpactrl::Client::builder().open().await.unwrap();
-    /// let wpa_attached = wpa.attach().await.unwrap();
-    /// # })
+    /// let mut wpa = wpactrl::Client::builder().open().await?;
+    /// let wpa_attached = wpa.attach().await?;
+    /// # Ok::<_,wpactrl::Error>(())
+    /// # })?;
+    /// # Ok::<_,wpactrl::Error>(())
     /// ```
     ///
     /// # Errors
@@ -264,9 +272,11 @@ impl ClientAttached {
     ///
     /// ```
     /// # tokio_test::block_on(async {
-    /// let mut wpa = wpactrl::Client::builder().open().await.unwrap().attach().await.unwrap();
-    /// wpa.detach().await.unwrap();
-    /// # })
+    /// let mut wpa = wpactrl::Client::builder().open().await?.attach().await?;
+    /// wpa.detach().await?;
+    /// # Ok::<_,wpactrl::Error>(())
+    /// # })?;
+    /// # Ok::<_,wpactrl::Error>(())
     /// ```
     ///
     /// # Errors
@@ -293,9 +303,11 @@ impl ClientAttached {
     ///
     /// ```
     /// # tokio_test::block_on(async {
-    /// let mut wpa = wpactrl::Client::builder().open().await.unwrap().attach().await.unwrap();
-    /// assert_eq!(wpa.recv().await.unwrap(), None);
-    /// # })
+    /// let mut wpa = wpactrl::Client::builder().open().await?.attach().await?;
+    /// assert_eq!(wpa.recv().await?, None);
+    /// # Ok::<_,wpactrl::Error>(())
+    /// # })?;
+    /// # Ok::<_,wpactrl::Error>(())
     /// ```
     ///
     /// # Errors
@@ -327,60 +339,60 @@ mod test {
     use serial_test::serial;
     use super::*;
 
-    async fn wpa_ctrl() -> Client {
-        Client::builder().open().await.unwrap()
+    async fn wpa_ctrl() -> Result<Client> {
+        Client::builder().open().await
     }
 
     #[tokio::test]
     #[serial]
-    async fn attach() {
+    async fn attach() -> Result<()> {
         wpa_ctrl()
-            .await
+            .await?
             .attach()
-            .await
-            .unwrap()
+            .await?
             .detach()
-            .await
-            .unwrap()
+            .await?
             .attach()
-            .await
-            .unwrap()
+            .await?
             .detach()
-            .await
-            .unwrap();
+            .await?;
+        Ok(())
     }
 
     #[tokio::test]
     #[serial]
-    async fn detach() {
-        let wpa = wpa_ctrl().await.attach().await.unwrap();
-        wpa.detach().await.unwrap();
+    async fn detach() -> Result<()> {
+        let wpa = wpa_ctrl().await?.attach().await?;
+        wpa.detach().await?;
+        Ok(())
     }
 
     #[tokio::test]
     #[serial]
-    async fn builder() {
-        wpa_ctrl().await;
+    async fn builder() -> Result<()> {
+        wpa_ctrl().await?;
+        Ok(())
     }
 
     #[tokio::test]
     #[serial]
-    async fn request() {
-        let mut wpa = wpa_ctrl().await;
-        assert_eq!(wpa.request("PING").await.unwrap(), "PONG\n");
-        let mut wpa_attached = wpa.attach().await.unwrap();
+    async fn request() -> Result<()> {
+        let mut wpa = wpa_ctrl().await?;
+        assert_eq!(wpa.request("PING").await?, "PONG\n");
+        let mut wpa_attached = wpa.attach().await?;
         // FIXME: This may not trigger the callback
-        assert_eq!(wpa_attached.request("PING").await.unwrap(), "PONG\n");
+        assert_eq!(wpa_attached.request("PING").await?, "PONG\n");
+        Ok(())
     }
 
     #[tokio::test]
     #[serial]
-    async fn recv() {
-        let mut wpa = wpa_ctrl().await.attach().await.unwrap();
-        assert_eq!(wpa.recv().await.unwrap(), None);
-        assert_eq!(wpa.request("SCAN").await.unwrap(), "OK\n");
+    async fn recv() -> Result<()> {
+        let mut wpa = wpa_ctrl().await?.attach().await?;
+        assert_eq!(wpa.recv().await?, None);
+        assert_eq!(wpa.request("SCAN").await?, "OK\n");
         loop {
-            match wpa.recv().await.unwrap() {
+            match wpa.recv().await? {
                 Some(s) => {
                     assert_eq!(&s[3..], "CTRL-EVENT-SCAN-STARTED ");
                     break;
@@ -388,6 +400,7 @@ mod test {
                 None => std::thread::sleep(std::time::Duration::from_millis(10)),
             }
         }
-        wpa.detach().await.unwrap();
+        wpa.detach().await?;
+        Ok(())
     }
 }

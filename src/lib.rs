@@ -11,9 +11,11 @@
 //! # tokio_test::block_on(async {
 //! use crate::wpactrl::WPAClient;
 //!
-//! let mut wpa = wpactrl::Client::builder().open().await.unwrap();
-//! println!("{}", wpa.request("LIST_NETWORKS").await.unwrap());
-//! # })
+//! let mut wpa = wpactrl::Client::builder().open().await?;
+//! println!("{}", wpa.request("LIST_NETWORKS").await?);
+//! # Ok::<_,wpactrl::Error>(())
+//! # })?;
+//! # Ok::<_,wpactrl::Error>(())
 //! ```
 //!
 //! The library currently only supports UNIX sockets, but additional
@@ -46,9 +48,11 @@ pub trait WPAClient {
     /// # tokio_test::block_on(async {
     /// use crate::wpactrl::WPAClient;
     ///
-    /// let mut wpa = wpactrl::Client::builder().open().await.unwrap();
-    /// assert_eq!(wpa.request("PING").await.unwrap(), "PONG\n");
-    /// # })
+    /// let mut wpa = wpactrl::Client::builder().open().await?;
+    /// assert_eq!(wpa.request("PING").await?, "PONG\n");
+    /// # Ok::<_,wpactrl::Error>(())
+    /// # })?;
+    /// # Ok::<_,wpactrl::Error>(())
     /// ```
     ///
     /// # Errors
