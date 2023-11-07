@@ -1,6 +1,6 @@
 #![deny(missing_docs)]
 use super::Result;
-use log::warn;
+use log::{debug, warn};
 use async_trait::async_trait;
 use std::collections::VecDeque;
 use std::os::unix::io::{AsRawFd, RawFd};
@@ -32,11 +32,14 @@ impl ClientBuilder {
     /// # Examples
     ///
     /// ```
+    /// # tokio_test::block_on(async {
     /// use wpactrl::Client;
     /// let wpa = Client::builder()
     ///             .cli_path("/tmp")
     ///             .open()
+    ///             .await
     ///             .unwrap();
+    /// # })
     /// ```
     #[must_use]
     pub fn cli_path<I, P>(mut self, cli_path: I) -> Self
@@ -54,11 +57,14 @@ impl ClientBuilder {
     /// # Examples
     ///
     /// ```
+    /// # tokio_test::block_on(async {
     /// use wpactrl::Client;
     /// let wpa = Client::builder()
     ///             .ctrl_path("/var/run/wpa_supplicant/wlan0")
     ///             .open()
+    ///             .await
     ///             .unwrap();
+    /// # })
     /// ```
     #[must_use]
     pub fn ctrl_path<I, P>(mut self, ctrl_path: I) -> Self
@@ -76,13 +82,15 @@ impl ClientBuilder {
     /// # Examples
     ///
     /// ```
+    /// # tokio_test::block_on(async {
     /// use wpactrl::Client;
-    /// let wpa = Client::builder().open().unwrap();
+    /// let wpa = Client::builder().open().await.unwrap();
+    /// # })
     /// ```
     /// # Errors
     ///
     /// * [[`Error::Io`]] - Low-level I/O error
-    pub fn open(self) -> Result<Client> {
+    pub async fn open(self) -> Result<Client> {
         let counter = COUNTER.fetch_add(1, Ordering::SeqCst);
         let mut tries = 0;
         loop {
@@ -103,7 +111,7 @@ impl ClientBuilder {
                     }));
                 }
                 Err(ref e) if tries < 2 && e.kind() == std::io::ErrorKind::AddrInUse => {
-                    std::fs::remove_file(bind_filepath)?;
+                    tokio::fs::remove_file(bind_filepath).await?;
                     continue;
                 }
                 Err(e) => return Err(e.into()),
@@ -165,6 +173,7 @@ impl ClientInternal {
 
     /// Send a command to `wpa_supplicant` / `hostapd`.
     pub (crate) async fn request<F: FnMut(&str)>(&mut self, cmd: &str, mut cb: F) -> Result<String> {
+        debug!("SEND: {:?}", cmd);
         self.handle.send(cmd.as_bytes()).await?;
         loop {
             select(self.handle.as_raw_fd(), Duration::from_secs(10))?;
@@ -201,7 +210,9 @@ impl Client {
     /// # Examples
     ///
     /// ```
-    /// let wpa = wpactrl::Client::builder().open().unwrap();
+    /// # tokio_test::block_on(async {
+    /// let wpa = wpactrl::Client::builder().open().await.unwrap();
+    /// # })
     /// ```
     #[must_use]
     pub fn builder() -> ClientBuilder {
@@ -213,8 +224,10 @@ impl Client {
     /// # Examples
     ///
     /// ```
-    /// let mut wpa = wpactrl::Client::builder().open().unwrap();
-    /// let wpa_attached = wpa.attach().unwrap();
+    /// # tokio_test::block_on(async {
+    /// let mut wpa = wpactrl::Client::builder().open().await.unwrap();
+    /// let wpa_attached = wpa.attach().await.unwrap();
+    /// # })
     /// ```
     ///
     /// # Errors
@@ -250,8 +263,10 @@ impl ClientAttached {
     /// # Examples
     ///
     /// ```
-    /// let mut wpa = wpactrl::Client::builder().open().unwrap().attach().unwrap();
-    /// wpa.detach().unwrap();
+    /// # tokio_test::block_on(async {
+    /// let mut wpa = wpactrl::Client::builder().open().await.unwrap().attach().await.unwrap();
+    /// wpa.detach().await.unwrap();
+    /// # })
     /// ```
     ///
     /// # Errors
@@ -277,8 +292,10 @@ impl ClientAttached {
     /// # Examples
     ///
     /// ```
-    /// let mut wpa = wpactrl::Client::builder().open().unwrap().attach().unwrap();
-    /// assert_eq!(wpa.recv().unwrap(), None);
+    /// # tokio_test::block_on(async {
+    /// let mut wpa = wpactrl::Client::builder().open().await.unwrap().attach().await.unwrap();
+    /// assert_eq!(wpa.recv().await.unwrap(), None);
+    /// # })
     /// ```
     ///
     /// # Errors
@@ -307,78 +324,70 @@ impl WPAClient for ClientAttached {
 
 #[cfg(test)]
 mod test {
-    use futures::executor::block_on;
     use serial_test::serial;
     use super::*;
 
-    fn wpa_ctrl() -> Client {
-        Client::builder().open().unwrap()
+    async fn wpa_ctrl() -> Client {
+        Client::builder().open().await.unwrap()
     }
 
-    #[test]
+    #[tokio::test]
     #[serial]
-    fn attach() {
-        block_on(async move {
-            wpa_ctrl()
-                .attach()
-                .await
-                .unwrap()
-                .detach()
-                .await
-                .unwrap()
-                .attach()
-                .await
-                .unwrap()
-                .detach()
-                .await
-                .unwrap();
-        })
+    async fn attach() {
+        wpa_ctrl()
+            .await
+            .attach()
+            .await
+            .unwrap()
+            .detach()
+            .await
+            .unwrap()
+            .attach()
+            .await
+            .unwrap()
+            .detach()
+            .await
+            .unwrap();
     }
 
-    #[test]
+    #[tokio::test]
     #[serial]
-    fn detach() {
-        block_on(async move {
-            let wpa = wpa_ctrl().attach().await.unwrap();
-            wpa.detach().await.unwrap();
-        })
+    async fn detach() {
+        let wpa = wpa_ctrl().await.attach().await.unwrap();
+        wpa.detach().await.unwrap();
     }
 
-    #[test]
+    #[tokio::test]
     #[serial]
-    fn builder() {
-        wpa_ctrl();
+    async fn builder() {
+        wpa_ctrl().await;
     }
 
-    #[test]
+    #[tokio::test]
     #[serial]
-    fn request() {
-        block_on(async move {
-            let mut wpa = wpa_ctrl();
-            assert_eq!(wpa.request("PING").await.unwrap(), "PONG\n");
-            let mut wpa_attached = wpa.attach().await.unwrap();
-            // FIXME: This may not trigger the callback
-            assert_eq!(wpa_attached.request("PING").await.unwrap(), "PONG\n");
-        });
+    async fn request() {
+        let mut wpa = wpa_ctrl().await;
+        assert_eq!(wpa.request("PING").await.unwrap(), "PONG\n");
+        let mut wpa_attached = wpa.attach().await.unwrap();
+        // FIXME: This may not trigger the callback
+        assert_eq!(wpa_attached.request("PING").await.unwrap(), "PONG\n");
     }
 
-    #[test]
+    #[tokio::test]
     #[serial]
-    fn recv() {
-        block_on(async move {
-            let mut wpa = wpa_ctrl().attach().await.unwrap();
-            assert_eq!(wpa.recv().await.unwrap(), None);
-            assert_eq!(wpa.request("SCAN").await.unwrap(), "OK\n");
-            loop {
-                match wpa.recv().await.unwrap() {
-                    Some(s) => {
-                        assert_eq!(&s[3..], "CTRL-EVENT-SCAN-STARTED ");
-                        break;
-                    }
-                    None => std::thread::sleep(std::time::Duration::from_millis(10)),
+    async fn recv() {
+        let mut wpa = wpa_ctrl().await.attach().await.unwrap();
+        assert_eq!(wpa.recv().await.unwrap(), None);
+        assert_eq!(wpa.request("SCAN").await.unwrap(), "OK\n");
+        loop {
+            match wpa.recv().await.unwrap() {
+                Some(s) => {
+                    assert_eq!(&s[3..], "CTRL-EVENT-SCAN-STARTED ");
+                    break;
                 }
+                None => std::thread::sleep(std::time::Duration::from_millis(10)),
             }
-            wpa.detach().await.unwrap();
-        })
+        }
+        wpa.detach().await.unwrap();
     }
 }
