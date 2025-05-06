@@ -1,7 +1,7 @@
 [package]
 name = "wpactrl"
 description = "wpa_supplicant control interface library"
-edition = "2021"
+edition = "2024"
 categories = [ "api-bindings", "embedded", "network-programming", "os" ]
 keywords = [ "hostapd", "wpa_cli", "wpa_ctrl", "wpa_supplicant" ]
 license = "MIT"
@@ -19,5 +19,4 @@ tokio = {version = "1.45", default-features = false, features = ["fs", "net"] }
 futures = { version = "0.3.31", default-features = false, features = ["executor"], optional = true}
 
 [dev-dependencies]
-serial_test = { version = "3.2.0", default-features = false }
-tokio = {version = "1.45", default-features = false, features = ["macros", "rt"] }
+tokio = {version = "1.45", default-features = false, features = ["macros", "rt", "sync", "time"] }

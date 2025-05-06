@@ -1,88 +1,12 @@
-use crate::WPAClient;
 use crate::Result;
+use crate::WPAClient as _;
 use futures::executor::block_on;
 use std::path::{Path, PathBuf};
-
-/// Builder object used to construct a [`Client`] session
-#[derive(Default)]
-pub struct ClientBuilder(crate::ClientBuilder);
-
-impl ClientBuilder {
-    /// A path-like object for this application's UNIX domain socket
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use wpactrl::sync::Client;
-    /// let wpa = Client::builder()
-    ///             .cli_path("/tmp")
-    ///             .open()?;
-    /// # Ok::<_,wpactrl::Error>(())
-    /// ```
-    #[must_use]
-    pub fn cli_path<I, P>(self, cli_path: I) -> Self
-    where
-        I: Into<Option<P>>,
-        P: AsRef<Path> + Sized,
-        PathBuf: From<P>,
-    {
-        Self(self.0.cli_path(cli_path))
-    }
-
-    /// A path-like object for the `wpa_supplicant` / `hostapd` UNIX domain sockets
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use wpactrl::sync::Client;
-    /// let wpa = Client::builder()
-    ///             .ctrl_path("/var/run/wpa_supplicant/wlan0")
-    ///             .open()?;
-    /// # Ok::<_,wpactrl::Error>(())
-    /// ```
-    #[must_use]
-    pub fn ctrl_path<I, P>(self, ctrl_path: I) -> Self
-    where
-        I: Into<Option<P>>,
-        P: AsRef<Path> + Sized,
-        PathBuf: From<P>,
-    {
-        Self(self.0.ctrl_path(ctrl_path))
-    }
-
-    /// Open a control interface to `wpa_supplicant` / `hostapd`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use wpactrl::sync::Client;
-    /// let wpa = Client::builder().open()?;
-    /// # Ok::<_,wpactrl::Error>(())
-    /// ```
-    /// # Errors
-    ///
-    /// * [[`Error::Io`]] - Low-level I/O error
-    pub fn open(self) -> Result<Client> {
-        Ok(Client(block_on(self.0.open())?))
-    }
-}
 
 /// A connection to `wpa_supplicant` / `hostapd`
 pub struct Client(crate::Client);
 
 impl Client {
-    /// Creates a builder for a `wpa_supplicant` / `hostapd` connection
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let wpa = wpactrl::Client::builder().open().unwrap();
-    /// ```
-    #[must_use]
-    pub fn builder() -> ClientBuilder {
-        ClientBuilder::default()
-    }
-
     /// Register as an event monitor for control interface messages
     ///
     /// # Examples
@@ -98,8 +22,22 @@ impl Client {
     /// * [`Error::Io`] - Low-level I/O error
     /// * [`Error::Utf8ToStr`] - Corrupted message or message with non-UTF8 characters
     /// * [`Error::Wait`] - Failed to wait on underlying Unix socket
+    #[inline]
     pub fn attach(self) -> Result<ClientAttached> {
         Ok(ClientAttached(block_on(self.0.attach())?))
+    }
+
+    /// Creates a builder for a `wpa_supplicant` / `hostapd` connection
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let wpa = wpactrl::Client::builder().open().unwrap();
+    /// ```
+    #[inline]
+    #[must_use]
+    pub fn builder() -> ClientBuilder {
+        ClientBuilder::default()
     }
 
     /// Send a command to `wpa_supplicant` / `hostapd`.
@@ -119,6 +57,7 @@ impl Client {
     /// * [`Error::Io`] - Low-level I/O error
     /// * [`Error::Utf8ToStr`] - Corrupted message or message with non-UTF8 characters
     /// * [`Error::Wait`] - Failed to wait on underlying Unix socket
+    #[inline]
     pub fn request(&mut self, cmd: &str) -> Result<String> {
         block_on(self.0.request(cmd))
     }
@@ -143,6 +82,7 @@ impl ClientAttached {
     /// * [`Error::Io`] - Low-level I/O error
     /// * [`Error::Utf8ToStr`] - Corrupted message or message with non-UTF8 characters
     /// * [`Error::Wait`] - Failed to wait on underlying Unix socket
+    #[inline]
     pub fn detach(self) -> Result<Client> {
         Ok(Client(block_on(self.0.detach())?))
     }
@@ -164,6 +104,7 @@ impl ClientAttached {
     /// * [`Error::Io`] - Low-level I/O error
     /// * [`Error::Utf8ToStr`] - Corrupted message or message with non-UTF8 characters
     /// * [`Error::Wait`] - Failed to wait on underlying Unix socket
+    #[inline]
     pub fn recv(&mut self) -> Result<Option<String>> {
         block_on(self.0.recv())
     }
@@ -188,23 +129,94 @@ impl ClientAttached {
     /// * [`Error::Io`] - Low-level I/O error
     /// * [`Error::Utf8ToStr`] - Corrupted message or message with non-UTF8 characters
     /// * [`Error::Wait`] - Failed to wait on underlying Unix socket
+    #[inline]
     pub fn request(&mut self, cmd: &str) -> Result<String> {
         block_on(self.0.request(cmd))
     }
 }
 
-#[cfg(test)]
-mod test {
-    use serial_test::serial;
-    use super::*;
+/// Builder object used to construct a [`Client`] session
+#[derive(Default)]
+pub struct ClientBuilder(crate::ClientBuilder);
 
-    fn wpa_ctrl() -> Result<Client> {
-        Client::builder().open()
+impl ClientBuilder {
+    /// A path-like object for this application's UNIX domain socket
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use wpactrl::sync::Client;
+    /// let wpa = Client::builder()
+    ///             .cli_path("/tmp")
+    ///             .open()?;
+    /// # Ok::<_,wpactrl::Error>(())
+    /// ```
+    #[inline]
+    #[must_use]
+    pub fn cli_path<I, P>(self, cli_path: I) -> Self
+    where
+        I: Into<Option<P>>,
+        P: AsRef<Path> + Sized,
+        PathBuf: From<P>,
+    {
+        Self(self.0.cli_path(cli_path))
     }
 
+    /// A path-like object for the `wpa_supplicant` / `hostapd` UNIX domain sockets
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use wpactrl::sync::Client;
+    /// let wpa = Client::builder()
+    ///             .ctrl_path("/var/run/wpa_supplicant/wlan0")
+    ///             .open()?;
+    /// # Ok::<_,wpactrl::Error>(())
+    /// ```
+    #[inline]
+    #[must_use]
+    pub fn ctrl_path<I, P>(self, ctrl_path: I) -> Self
+    where
+        I: Into<Option<P>>,
+        P: AsRef<Path> + Sized,
+        PathBuf: From<P>,
+    {
+        Self(self.0.ctrl_path(ctrl_path))
+    }
+
+    /// Open a control interface to `wpa_supplicant` / `hostapd`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use wpactrl::sync::Client;
+    /// let wpa = Client::builder().open()?;
+    /// # Ok::<_,wpactrl::Error>(())
+    /// ```
+    /// # Errors
+    ///
+    /// * [[`Error::Io`]] - Low-level I/O error
+    #[inline]
+    pub fn open(self) -> Result<Client> {
+        Ok(Client(block_on(self.0.open())?))
+    }
+}
+
+#[cfg(test)]
+#[expect(clippy::panic_in_result_fn, reason = "test")]
+mod test {
+    use core::time::Duration;
+    use super::*;
+
+    use std::sync::{LazyLock, Mutex};
+    use std::thread;
+
+    static SERIAL: LazyLock<Mutex<()>> = LazyLock::new(Mutex::default);
+
     #[test]
-    #[serial]
     fn attach() -> Result<()> {
+        #[expect(clippy::unwrap_used, reason = "test")]
+        let _lock = SERIAL.lock().unwrap();
         wpa_ctrl()?
             .attach()?
             .detach()?
@@ -214,23 +226,46 @@ mod test {
     }
 
     #[test]
-    #[serial]
+    fn builder() -> Result<()> {
+        #[expect(clippy::unwrap_used, reason = "test")]
+        let _lock = SERIAL.lock().unwrap();
+        wpa_ctrl()?;
+        Ok(())
+    }
+
+    #[test]
     fn detach() -> Result<()> {
+        #[expect(clippy::unwrap_used, reason = "test")]
+        let _lock = SERIAL.lock().unwrap();
         let wpa = wpa_ctrl()?.attach()?;
         wpa.detach()?;
         Ok(())
     }
 
     #[test]
-    #[serial]
-    fn builder() -> Result<()> {
-        wpa_ctrl()?;
+    fn recv() -> Result<()> {
+        #[expect(clippy::unwrap_used, reason = "test")]
+        let _lock = SERIAL.lock().unwrap();
+        let mut wpa = wpa_ctrl()?.attach()?;
+        assert_eq!(wpa.recv()?, None);
+        assert_eq!(wpa.request("SCAN")?, "OK\n");
+        loop {
+            match wpa.recv()? {
+                Some(reply) => {
+                    assert_eq!(reply.get(3..), Some("CTRL-EVENT-SCAN-STARTED "));
+                    break;
+                }
+                None => thread::sleep(Duration::from_millis(10)),
+            }
+        }
+        wpa.detach()?;
         Ok(())
     }
 
     #[test]
-    #[serial]
     fn request() -> Result<()> {
+        #[expect(clippy::unwrap_used, reason = "test")]
+        let _lock = SERIAL.lock().unwrap();
         let mut wpa = wpa_ctrl()?;
         assert_eq!(wpa.request("PING")?, "PONG\n");
         let mut wpa_attached = wpa.attach()?;
@@ -239,22 +274,7 @@ mod test {
         Ok(())
     }
 
-    #[test]
-    #[serial]
-    fn recv() -> Result<()> {
-        let mut wpa = wpa_ctrl()?.attach()?;
-        assert_eq!(wpa.recv()?, None);
-        assert_eq!(wpa.request("SCAN")?, "OK\n");
-        loop {
-            match wpa.recv()? {
-                Some(s) => {
-                    assert_eq!(&s[3..], "CTRL-EVENT-SCAN-STARTED ");
-                    break;
-                }
-                None => std::thread::sleep(std::time::Duration::from_millis(10)),
-            }
-        }
-        wpa.detach()?;
-        Ok(())
+    fn wpa_ctrl() -> Result<Client> {
+        Client::builder().open()
     }
 }
