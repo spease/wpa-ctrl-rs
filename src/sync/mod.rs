@@ -1,6 +1,72 @@
+use crate::WPAClient;
 use crate::Result;
-use crate::{ClientBuilder};
 use futures::executor::block_on;
+use std::path::{Path, PathBuf};
+
+/// Builder object used to construct a [`Client`] session
+#[derive(Default)]
+pub struct ClientBuilder(crate::ClientBuilder);
+
+impl ClientBuilder {
+    /// A path-like object for this application's UNIX domain socket
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use wpactrl::sync::Client;
+    /// let wpa = Client::builder()
+    ///             .cli_path("/tmp")
+    ///             .open()?;
+    /// # Ok::<_,wpactrl::Error>(())
+    /// ```
+    #[must_use]
+    pub fn cli_path<I, P>(self, cli_path: I) -> Self
+    where
+        I: Into<Option<P>>,
+        P: AsRef<Path> + Sized,
+        PathBuf: From<P>,
+    {
+        Self(self.0.cli_path(cli_path))
+    }
+
+    /// A path-like object for the `wpa_supplicant` / `hostapd` UNIX domain sockets
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use wpactrl::sync::Client;
+    /// let wpa = Client::builder()
+    ///             .ctrl_path("/var/run/wpa_supplicant/wlan0")
+    ///             .open()?;
+    /// # Ok::<_,wpactrl::Error>(())
+    /// ```
+    #[must_use]
+    pub fn ctrl_path<I, P>(self, ctrl_path: I) -> Self
+    where
+        I: Into<Option<P>>,
+        P: AsRef<Path> + Sized,
+        PathBuf: From<P>,
+    {
+        Self(self.0.ctrl_path(ctrl_path))
+    }
+
+    /// Open a control interface to `wpa_supplicant` / `hostapd`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use wpactrl::sync::Client;
+    /// let wpa = Client::builder().open()?;
+    /// # Ok::<_,wpactrl::Error>(())
+    /// ```
+    /// # Errors
+    ///
+    /// * [[`Error::Io`]] - Low-level I/O error
+    pub fn open(self) -> Result<Client> {
+        Ok(Client(block_on(self.0.open())?))
+    }
+}
+
 /// A connection to `wpa_supplicant` / `hostapd`
 pub struct Client(crate::Client);
 
@@ -124,5 +190,71 @@ impl ClientAttached {
     /// * [`Error::Wait`] - Failed to wait on underlying Unix socket
     pub fn request(&mut self, cmd: &str) -> Result<String> {
         block_on(self.0.request(cmd))
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use serial_test::serial;
+    use super::*;
+
+    fn wpa_ctrl() -> Result<Client> {
+        Client::builder().open()
+    }
+
+    #[test]
+    #[serial]
+    fn attach() -> Result<()> {
+        wpa_ctrl()?
+            .attach()?
+            .detach()?
+            .attach()?
+            .detach()?;
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn detach() -> Result<()> {
+        let wpa = wpa_ctrl()?.attach()?;
+        wpa.detach()?;
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn builder() -> Result<()> {
+        wpa_ctrl()?;
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn request() -> Result<()> {
+        let mut wpa = wpa_ctrl()?;
+        assert_eq!(wpa.request("PING")?, "PONG\n");
+        let mut wpa_attached = wpa.attach()?;
+        // FIXME: This may not trigger the callback
+        assert_eq!(wpa_attached.request("PING")?, "PONG\n");
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn recv() -> Result<()> {
+        let mut wpa = wpa_ctrl()?.attach()?;
+        assert_eq!(wpa.recv()?, None);
+        assert_eq!(wpa.request("SCAN")?, "OK\n");
+        loop {
+            match wpa.recv()? {
+                Some(s) => {
+                    assert_eq!(&s[3..], "CTRL-EVENT-SCAN-STARTED ");
+                    break;
+                }
+                None => std::thread::sleep(std::time::Duration::from_millis(10)),
+            }
+        }
+        wpa.detach()?;
+        Ok(())
     }
 }

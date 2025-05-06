@@ -1,15 +1,14 @@
 #![deny(missing_docs)]
 use super::Result;
+use core::sync::atomic::{AtomicUsize, Ordering};
+use core::time::Duration;
 use log::{debug, warn};
-use async_trait::async_trait;
 use std::collections::VecDeque;
 use std::os::unix::io::{AsRawFd, RawFd};
-use tokio::net::UnixDatagram;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Duration;
-use crate::WPAClient;
+use tokio::net::UnixDatagram;
 
+use crate::WPAClient;
 use crate::error::Error;
 
 const BUF_SIZE: usize = 10_240;
@@ -133,7 +132,7 @@ pub (crate) struct ClientInternal {
 fn select(fd: RawFd, duration: Duration) -> Result<bool> {
     let r = unsafe {
         let mut raw_fd_set = {
-            let mut raw_fd_set = std::mem::MaybeUninit::<libc::fd_set>::uninit();
+            let mut raw_fd_set = core::mem::MaybeUninit::<libc::fd_set>::uninit();
             libc::FD_ZERO(raw_fd_set.as_mut_ptr());
             raw_fd_set.assume_init()
         };
@@ -141,11 +140,11 @@ fn select(fd: RawFd, duration: Duration) -> Result<bool> {
         libc::select(
             fd + 1,
             &mut raw_fd_set,
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
+            core::ptr::null_mut(),
+            core::ptr::null_mut(),
             &mut libc::timeval {
                 tv_sec: duration.as_secs().try_into().unwrap(),
-                tv_usec: duration.subsec_micros().try_into().unwrap(),
+                tv_usec: duration.subsec_micros().into(),
             },
         )
     };
@@ -167,9 +166,9 @@ impl ClientInternal {
     pub (crate) async fn recv(&mut self) -> Result<Option<String>> {
         if self.pending()? {
             let buf_len = self.handle.recv(&mut self.buffer).await?;
-            std::str::from_utf8(&self.buffer[0..buf_len])
+            core::str::from_utf8(&self.buffer[0..buf_len])
                 .map(|s| Some(s.to_owned()))
-                .map_err(std::convert::Into::into)
+                .map_err(core::convert::Into::into)
         } else {
             Ok(None)
         }
@@ -183,7 +182,7 @@ impl ClientInternal {
             select(self.handle.as_raw_fd(), Duration::from_secs(10))?;
             match self.handle.recv(&mut self.buffer).await {
                 Ok(len) => {
-                    let s = std::str::from_utf8(&self.buffer[0..len])?;
+                    let s = core::str::from_utf8(&self.buffer[0..len])?;
                     if s.starts_with('<') {
                         cb(s);
                     } else {
@@ -254,7 +253,6 @@ impl Client {
     }
 }
 
-#[async_trait]
 impl WPAClient for Client {
     async fn request(&mut self, cmd: &str) -> Result<String> {
         self.0.request(cmd, |_: &str| ()).await
@@ -324,7 +322,6 @@ impl ClientAttached {
     }
 }
 
-#[async_trait]
 impl WPAClient for ClientAttached {
     async fn request(&mut self, cmd: &str) -> Result<String> {
         let mut messages = VecDeque::new();

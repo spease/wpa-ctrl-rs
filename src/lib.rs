@@ -9,7 +9,7 @@
 //!
 //! ```
 //! # tokio_test::block_on(async {
-//! use crate::wpactrl::WPAClient;
+//! use wpactrl::WPAClient;
 //!
 //! let mut wpa = wpactrl::Client::builder().open().await?;
 //! println!("{}", wpa.request("LIST_NETWORKS").await?);
@@ -27,7 +27,6 @@ mod wpactrl;
 #[cfg(feature = "sync")]
 pub mod sync;
 pub use crate::wpactrl::{Client, ClientAttached, ClientBuilder};
-use async_trait::async_trait;
 
 pub use crate::error::Error;
 
@@ -35,7 +34,6 @@ pub use crate::error::Error;
 pub type Result<T> = ::std::result::Result<T, Error>;
 
 /// this trait is a way to abstract implementation between ClientAttached and Client
-#[async_trait]
 pub trait WPAClient {
     /// Send a command to `wpa_supplicant` / `hostapd`.
     ///
@@ -46,7 +44,7 @@ pub trait WPAClient {
     ///
     /// ```
     /// # tokio_test::block_on(async {
-    /// use crate::wpactrl::WPAClient;
+    /// use wpactrl::WPAClient;
     ///
     /// let mut wpa = wpactrl::Client::builder().open().await?;
     /// assert_eq!(wpa.request("PING").await?, "PONG\n");
@@ -60,5 +58,5 @@ pub trait WPAClient {
     /// * [`Error::Io`] - Low-level I/O error
     /// * [`Error::Utf8ToStr`] - Corrupted message or message with non-UTF8 characters
     /// * [`Error::Wait`] - Failed to wait on underlying Unix socket
-    async fn request(&mut self, cmd: &str) -> Result<String>;
+    fn request(&mut self, cmd: &str) -> impl std::future::Future<Output = Result<String>>;
 }
